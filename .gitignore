@@ -19,3 +19,6 @@ node_modules/
 .pytest_cache/
 .coverage
 htmlcov/
+
+# Personal learning notes — not for public docs
+docs/*_learning_notes.md
