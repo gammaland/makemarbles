@@ -2,7 +2,6 @@
 
 **Status:** Accepted
 **Date:** 2026-06-03
-**Supersedes:** Portions of `docs/design-decisions.md` "产品定位" and "Why not Obsidian" sections (those framed MakeMarbles as "AI 数据层"; this ADR widens the framing).
 
 ## Context
 
