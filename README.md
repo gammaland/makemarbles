@@ -8,14 +8,30 @@
 
 ## Why
 
-Most note tools are built for humans reading on screen. Today, a personal knowledge layer also needs to be **callable by AI agents** — to capture context during an LLM session, to search prior notes inside an agent's reasoning loop, and to do so without uploading your private journal to a cloud service.
+You are talking to an LLM agent in your terminal. A relevant thought hits — about the project, a meeting earlier, a half-baked idea. You don't want to break flow to open a notes app, find the right vault, type, and switch back. Tomorrow, in a fresh agent session, you want that thought retrievable — by you, and by the agent itself.
 
-Existing note apps treat AI as a UI feature glued on the side. MakeMarbles treats it as a first-class I/O channel:
+The problem MakeMarbles addresses: **frictionless capture from the shell, durable retrieval by both human and AI agent, with notes stored locally as the source of truth.**
 
-- **Human channel** — a CLI (`marbles log …`) you can call from a shell alias, terminal, or iOS Shortcut.
-- **LLM channel** — an MCP server exposing the same operations as tools, so agents capture and search in their own context.
+Existing tools each cover part of this, but not the combination:
 
-Both channels read and write the same local SQLite store. No API contract drift, no background daemon, no cloud round-trip.
+| Tool                  | Local-first         | LLM-agent callable          | Open source         | Capture path                            |
+| --------------------- | ------------------- | --------------------------- | ------------------- | --------------------------------------- |
+| **MakeMarbles**       | SQLite              | CLI + MCP (v0.2)            | AGPL client         | `marbles log "..."` from any shell      |
+| Obsidian              | markdown vault      | 3rd-party plugins           | closed, free        | open app → file → write                 |
+| Logseq                | files               | 3rd-party plugins           | yes (AGPL)          | open app → write                        |
+| Notion                | cloud               | REST API (rate-limited)     | no                  | open app → page → block                 |
+| Mem.ai / Reflect      | cloud               | closed AI features only     | no                  | cloud-only                              |
+| Apple Notes / Bear    | local               | none                        | no                  | open app                                |
+| Screenpipe            | local               | passive ingestion only      | yes                 | continuous screen recording             |
+
+MakeMarbles makes a narrow bet: **the user is comfortable in a terminal, spends part of their day inside an LLM agent, and wants their journal addressable from both sides without uploading it to a cloud service.** If you're not that person, Obsidian and Logseq are more polished. If you don't mind cloud, Mem.ai is more AI-feature-rich. MakeMarbles exists for the gap they leave open.
+
+The two I/O channels share one implementation:
+
+- **Human channel** — a CLI you call from a shell alias, terminal, or iOS Shortcut.
+- **LLM channel** — an MCP server (v0.2) exposing the same operations as tools, so agents capture and search inside their own context.
+
+No API contract drift, no background daemon, no cloud round-trip.
 
 ---
 
@@ -114,16 +130,6 @@ $ marbles search "hybrid"
 | v0.5    | Cross-device sync (Cloudflare Durable Objects)| planned       |
 
 Sync remains optional — the local SQLite is always the source of truth.
-
-Full design rationale: [docs/roadmap.md](docs/roadmap.md), [docs/design-decisions.md](docs/design-decisions.md).
-
----
-
-## Design notes
-
-- [`docs/design-decisions.md`](docs/design-decisions.md) — why FTS5, why ULID, why SQLite as source of truth, why no sync in v0.1
-- [`docs/roadmap.md`](docs/roadmap.md) — phased plan through v0.5
-- [`docs/mvp_sprint_2026-06.md`](docs/mvp_sprint_2026-06.md) — current sprint plan and acceptance log
 
 ---
 
