@@ -16,3 +16,6 @@ env/
 node_modules/
 .wrangler/
 .dev.vars
+.pytest_cache/
+.coverage
+htmlcov/
