@@ -28,13 +28,14 @@ mcp = [
 
 [project.scripts]
 marbles = "cli.main:app"
+marbles-mcp = "marbles_mcp.server:main"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["cli", "core", "mcp"]
+packages = ["cli", "core", "marbles_mcp"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

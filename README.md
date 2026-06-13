@@ -16,7 +16,7 @@ Existing tools each cover part of this, but not the combination:
 
 | Tool                  | Local-first         | LLM-agent callable          | Open source         | Capture path                            |
 | --------------------- | ------------------- | --------------------------- | ------------------- | --------------------------------------- |
-| **MakeMarbles**       | SQLite              | CLI + MCP (v0.2)            | AGPL client         | `marbles log "..."` from any shell      |
+| **MakeMarbles**       | SQLite              | CLI + MCP                   | AGPL client         | `marbles log "..."` from any shell      |
 | Obsidian              | markdown vault      | 3rd-party plugins           | closed, free        | open app → file → write                 |
 | Logseq                | files               | 3rd-party plugins           | yes (AGPL)          | open app → write                        |
 | Notion                | cloud               | REST API (rate-limited)     | no                  | open app → page → block                 |
@@ -29,7 +29,7 @@ MakeMarbles makes a narrow bet: **the user is comfortable in a terminal, spends 
 The two I/O channels share one implementation:
 
 - **Human channel** — a CLI you call from a shell alias, terminal, or iOS Shortcut.
-- **LLM channel** — an MCP server (v0.2) exposing the same operations as tools, so agents capture and search inside their own context.
+- **LLM channel** — an MCP server exposing the same operations as tools, so agents capture and search inside their own context.
 
 No API contract drift, no background daemon, no cloud round-trip.
 
@@ -45,7 +45,7 @@ No API contract drift, no background daemon, no cloud round-trip.
         │                               │
         ▼                               ▼
    ┌──────────────┐              ┌──────────────┐
-   │ marbles CLI  │              │  MCP server  │  ← v0.2
+   │ marbles CLI  │              │  MCP server  │
    │  (Typer)     │              │  (thin shim) │
    └──────┬───────┘              └──────┬───────┘
           │                             │
@@ -168,11 +168,53 @@ Pass `-y` to skip confirmation; non-tty contexts (pipes, agents) skip it automat
 
 ---
 
+## MCP server — wire marbles into your agent
+
+`marbles-mcp` exposes two tools to any MCP-compatible client (Claude Desktop, Claude Code, Cursor, Cline, Continue):
+
+| Tool           | Signature                                       | Purpose                                 |
+| -------------- | ----------------------------------------------- | --------------------------------------- |
+| `add_note`     | `add_note(content: str, tag: str \| None)`      | Capture a marble from inside the agent  |
+| `search_notes` | `search_notes(query: str, limit: int = 10)`     | Recall prior context before answering   |
+
+Both tools share the same `core/` storage as the CLI — no parallel implementation, no schema drift.
+
+### Install
+
+```bash
+uv sync --extra mcp           # or: pip install -e '.[mcp]'
+```
+
+### Claude Desktop / Cursor / Cline
+
+Add to your client's MCP config (`~/Library/Application Support/Claude/claude_desktop_config.json` on macOS):
+
+```json
+{
+  "mcpServers": {
+    "marbles": {
+      "command": "/absolute/path/to/makemarbles/.venv/bin/marbles-mcp"
+    }
+  }
+}
+```
+
+### Claude Code
+
+```bash
+claude mcp add marbles /absolute/path/to/makemarbles/.venv/bin/marbles-mcp
+```
+
+After restart, the agent can ask "remember that I decided to use FastMCP" → `add_note`, or "what did I say about kafka rebalances last week?" → `search_notes`. The database at `~/.marbles/marbles.db` is the same one your CLI writes to.
+
+---
+
 ## What's shipped (v0.1.0-alpha)
 
 - **CLI**: `log`, `recent`, `search`, `count`, `rm`, `shell`
 - **Input**: positional arg, stdin pipe, `--editor` for multi-line composition
 - **Output**: pretty tables by default, `--json` on every command for scripting and agent use
+- **MCP server**: `marbles-mcp` with `add_note` + `search_notes` tools (stdio transport)
 - **Storage**: local SQLite at `~/.marbles/marbles.db` (single file, no daemon)
 - **Search**: FTS5 keyword index with Porter stemming + BM25 ranking; user queries are escaped so `C++` and stray operators don't crash
 - **IDs**: ULID — sortable by creation time without a separate timestamp column
@@ -181,11 +223,10 @@ Pass `-y` to skip confirmation; non-tty contexts (pipes, agents) skip it automat
 
 | Version | Adds                                          | Status        |
 | ------- | --------------------------------------------- | ------------- |
-| v0.1    | CLI + FTS5 keyword search                     | shipped       |
-| v0.2    | MCP server (`add_note`, `search_notes`)       | in sprint     |
-| v0.3    | Local vector search (ONNX, multilingual)      | planned       |
-| v0.4    | Hybrid retrieval (FTS5 + vector via RRF)      | planned       |
-| v0.5    | Cross-device sync (Cloudflare Durable Objects)| planned       |
+| v0.1    | CLI + FTS5 keyword search + MCP server        | shipped       |
+| v0.2    | Local vector search (ONNX, multilingual)      | planned       |
+| v0.3    | Hybrid retrieval (FTS5 + vector via RRF)      | planned       |
+| v0.4    | Cross-device sync (Cloudflare Durable Objects)| planned       |
 
 Sync remains optional — the local SQLite is always the source of truth.
 
