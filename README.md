@@ -112,11 +112,53 @@ $ marbles search "hybrid"
 
 ---
 
+## Capturing multi-line notes
+
+`marbles log` accepts content through five paths. Pick whichever fits the moment:
+
+```bash
+# 1. Editor — opens $EDITOR (vim/nano/code) with a markdown template.
+#    Lines starting with '#' are stripped, git-commit style. Best for prose.
+marbles log -e
+
+# 2. Pipe — anything on stdin becomes the note body, newlines preserved.
+printf 'line one\nline two\n' | marbles log
+git log -1 --pretty=%B | marbles log -t commit
+
+# 3. Heredoc — single-shot block from the shell.
+marbles log "$(cat <<'EOF'
+para one
+para two with **markdown**
+EOF
+)"
+
+# 4. File redirect — turn an existing draft into a note.
+marbles log < draft.md
+
+# 5. Shell escapes — zsh/bash $'...' interprets \n.
+marbles log $'quick\nmulti-line\nthought'
+```
+
+For scripts and agents, every command takes `--json` for structured output:
+
+```bash
+$ marbles log "shipping notes" --json
+{"id":"01KV0F4HH...","content":"shipping notes","tag":null,"created_at":"2026-06-13T12:26:03Z"}
+
+$ marbles search "marathon" --json | jq '.[].content'
+```
+
+Prefer staying in one session? `marbles shell` drops into an interactive REPL with command history and tab completion — `log -e` works inside it too.
+
+---
+
 ## What's shipped (v0.1.0-alpha)
 
-- **CLI**: `log`, `recent`, `search`, `count`
+- **CLI**: `log`, `recent`, `search`, `count`, `shell`
+- **Input**: positional arg, stdin pipe, `--editor` for multi-line composition
+- **Output**: pretty tables by default, `--json` on every command for scripting and agent use
 - **Storage**: local SQLite at `~/.marbles/marbles.db` (single file, no daemon)
-- **Search**: FTS5 keyword index with Porter stemming + BM25 ranking
+- **Search**: FTS5 keyword index with Porter stemming + BM25 ranking; user queries are escaped so `C++` and stray operators don't crash
 - **IDs**: ULID — sortable by creation time without a separate timestamp column
 
 ## Roadmap
