@@ -93,6 +93,58 @@ def test_log_editor_empty_errors(runner: CliRunner, monkeypatch: pytest.MonkeyPa
     assert result.exit_code != 0
 
 
+def test_rm_by_prefix_with_yes_flag(runner: CliRunner):
+    log_result = runner.invoke(cli_main.app, ["log", "to be deleted", "--json"])
+    note_id = json.loads(log_result.stdout.strip())["id"]
+    result = runner.invoke(cli_main.app, ["rm", note_id[:8], "-y", "--json"])
+    assert result.exit_code == 0
+    assert json.loads(result.stdout.strip()) == {"deleted": note_id}
+    assert json.loads(
+        runner.invoke(cli_main.app, ["count", "--json"]).stdout.strip()
+    ) == {"count": 0}
+
+
+def test_rm_no_match_errors(runner: CliRunner):
+    result = runner.invoke(cli_main.app, ["rm", "01ZZZZZZ", "-y"])
+    assert result.exit_code != 0
+    assert "no note matches" in result.stdout
+
+
+def test_rm_ambiguous_prefix_refuses(runner: CliRunner):
+    runner.invoke(cli_main.app, ["log", "note one"])
+    runner.invoke(cli_main.app, ["log", "note two"])
+    result = runner.invoke(cli_main.app, ["rm", "01", "-y"])
+    assert result.exit_code != 0
+    assert "ambiguous" in result.stdout
+    assert json.loads(
+        runner.invoke(cli_main.app, ["count", "--json"]).stdout.strip()
+    ) == {"count": 2}
+
+
+def test_rm_confirm_abort_keeps_note(
+    runner: CliRunner, monkeypatch: pytest.MonkeyPatch
+):
+    log_result = runner.invoke(cli_main.app, ["log", "keep me", "--json"])
+    note_id = json.loads(log_result.stdout.strip())["id"]
+    # Force the confirm prompt path by faking a tty.
+    monkeypatch.setattr(cli_main, "_is_interactive", lambda: True)
+    result = runner.invoke(cli_main.app, ["rm", note_id[:8]], input="n\n")
+    assert result.exit_code != 0
+    assert "aborted" in result.stdout
+    assert json.loads(
+        runner.invoke(cli_main.app, ["count", "--json"]).stdout.strip()
+    ) == {"count": 1}
+
+
+def test_rm_non_tty_skips_confirmation(runner: CliRunner):
+    """Pipe/agent context: stdin is not a tty, so rm proceeds without -y."""
+    log_result = runner.invoke(cli_main.app, ["log", "scripted delete", "--json"])
+    note_id = json.loads(log_result.stdout.strip())["id"]
+    result = runner.invoke(cli_main.app, ["rm", note_id[:8], "--json"])
+    assert result.exit_code == 0
+    assert json.loads(result.stdout.strip()) == {"deleted": note_id}
+
+
 def test_search_special_chars_does_not_crash(runner: CliRunner):
     runner.invoke(cli_main.app, ["log", "C++ async"])
     result = runner.invoke(cli_main.app, ["search", "C++", "--json"])

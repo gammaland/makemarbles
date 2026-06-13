@@ -73,6 +73,19 @@ class Storage:
     def count(self) -> int:
         return self.db["notes"].count
 
+    def find_by_prefix(self, prefix: str, limit: int = 10) -> list[Note]:
+        rows = self.db["notes"].rows_where(
+            "id LIKE ?", [prefix + "%"], order_by="created_at desc", limit=limit
+        )
+        return [self._to_note(r) for r in rows]
+
+    def delete(self, note_id: str) -> bool:
+        try:
+            self.db["notes"].delete(note_id)
+        except sqlite_utils.db.NotFoundError:
+            return False
+        return True
+
     @staticmethod
     def _to_note(row: dict) -> Note:
         return Note(

@@ -64,6 +64,26 @@ def test_search_empty_query_returns_empty(storage: Storage):
     assert storage.search("   ") == []
 
 
+def test_delete_removes_note_and_fts_entry(storage: Storage):
+    note_id = storage.add(Note(content="ephemeral thought about kafka"))
+    assert storage.delete(note_id) is True
+    assert storage.get(note_id) is None
+    assert storage.search("kafka") == []
+
+
+def test_delete_missing_returns_false(storage: Storage):
+    assert storage.delete("01nonexistent") is False
+
+
+def test_find_by_prefix(storage: Storage):
+    a = storage.add(Note(content="alpha"))
+    b = storage.add(Note(content="beta"))
+    # Full id always uniquely matches.
+    assert [n.id for n in storage.find_by_prefix(a)] == [a]
+    # Empty prefix returns everything (LIKE '%' matches all).
+    assert {n.id for n in storage.find_by_prefix("")} == {a, b}
+
+
 def test_search_multitoken_implicit_and(storage: Storage):
     storage.add(Note(content="plan a marathon"))
     storage.add(Note(content="plan a vacation"))

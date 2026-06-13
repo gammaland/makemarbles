@@ -14,7 +14,7 @@ from rich.table import Table
 from core.models import Note
 from core.storage import Storage
 
-REPL_COMMANDS = ["log", "recent", "search", "count", "help", "quit", "exit"]
+REPL_COMMANDS = ["log", "recent", "search", "count", "rm", "help", "quit", "exit"]
 REPL_HISTORY = "~/.marbles/.shell_history"
 
 app = typer.Typer(
@@ -34,17 +34,22 @@ def _render_notes(notes: list[Note], title: str) -> None:
         console.print(f"[dim]No notes for {title}.[/dim]")
         return
     table = Table(title=title, show_lines=False, expand=True)
+    table.add_column("id", style="magenta", no_wrap=True)
     table.add_column("when", style="dim", no_wrap=True)
     table.add_column("tag", style="cyan", no_wrap=True)
     table.add_column("content")
     for note in notes:
         when = note.created_at.astimezone().strftime("%m-%d %H:%M")
-        table.add_row(when, note.tag or "", note.content)
+        table.add_row(note.id[:12], when, note.tag or "", note.content)
     console.print(table)
 
 
 def _emit_json(payload) -> None:
     sys.stdout.write(json.dumps(payload, ensure_ascii=False) + "\n")
+
+
+def _is_interactive() -> bool:
+    return sys.stdin.isatty()
 
 
 def _resolve_content(content: str | None) -> str:
@@ -56,7 +61,7 @@ def _resolve_content(content: str | None) -> str:
         if not content.strip():
             raise typer.BadParameter("content is whitespace-only.")
         return content
-    if sys.stdin.isatty():
+    if _is_interactive():
         raise typer.BadParameter(
             "no content provided (pass a string, pipe stdin, or use '-')."
         )
@@ -109,7 +114,7 @@ def log(
     else:
         first = text.splitlines()[0] if text else ""
         suffix = " …" if "\n" in text else ""
-        console.print(f"[green]✓[/green] {note.id[:8]}  {first}{suffix}")
+        console.print(f"[green]✓[/green] {note.id[:12]}  {first}{suffix}")
 
 
 @app.command()
@@ -145,6 +150,43 @@ def search(
 
 
 @app.command()
+def rm(
+    id_prefix: Annotated[str, typer.Argument(help="Note id or unique prefix.")],
+    yes: Annotated[
+        bool, typer.Option("--yes", "-y", help="Skip confirmation prompt.")
+    ] = False,
+    as_json: Annotated[
+        bool, typer.Option("--json", help="Emit the deleted id as JSON.")
+    ] = False,
+) -> None:
+    """Delete a note by id or unique prefix."""
+    storage = _storage()
+    matches = storage.find_by_prefix(id_prefix)
+    if not matches:
+        console.print(f"[red]no note matches[/red] {id_prefix!r}")
+        raise typer.Exit(1)
+    if len(matches) > 1:
+        console.print(f"[yellow]ambiguous[/yellow] — {len(matches)} notes match:")
+        for n in matches:
+            preview = n.content.splitlines()[0][:60]
+            console.print(f"  {n.id[:12]}  {preview}")
+        raise typer.Exit(1)
+    target = matches[0]
+    if not yes and _is_interactive():
+        preview = target.content.splitlines()[0][:60]
+        suffix = " …" if "\n" in target.content else ""
+        console.print(f"[yellow]delete[/yellow] {target.id[:8]}  {preview}{suffix}")
+        if not typer.confirm("confirm?", default=False):
+            console.print("[dim]aborted.[/dim]")
+            raise typer.Exit(1)
+    storage.delete(target.id)
+    if as_json:
+        _emit_json({"deleted": target.id})
+    else:
+        console.print(f"[green]✓ deleted[/green] {target.id[:8]}")
+
+
+@app.command()
 def count(
     as_json: Annotated[
         bool, typer.Option("--json", help="Emit count as JSON object.")
@@ -166,6 +208,7 @@ def _repl_help() -> None:
         "  [cyan]recent[/cyan] [--days N] [--limit N]\n"
         "  [cyan]search[/cyan] <query> [--limit N]\n"
         "  [cyan]count[/cyan]\n"
+        "  [cyan]rm[/cyan] <id-prefix> [-y]      delete a note\n"
         "  [cyan]help[/cyan]                    show this\n"
         "  [cyan]quit[/cyan] / [cyan]exit[/cyan] / Ctrl-D    leave"
     )

@@ -150,11 +150,27 @@ $ marbles search "marathon" --json | jq '.[].content'
 
 Prefer staying in one session? `marbles shell` drops into an interactive REPL with command history and tab completion — `log -e` works inside it too.
 
+## Deleting notes
+
+Every `recent` / `search` row carries a 12-character id prefix; pass it to `rm`:
+
+```bash
+$ marbles recent
+│ 01KV0FJ0RX34 │ 06-13 05:33 │       │ third note  │
+
+$ marbles rm 01KV0FJ0RX34
+delete 01KV0FJ0  third note
+confirm? [y/N]: y
+✓ deleted 01KV0FJ0
+```
+
+Pass `-y` to skip confirmation; non-tty contexts (pipes, agents) skip it automatically. Ambiguous prefixes are refused with the candidate list instead of guessing.
+
 ---
 
 ## What's shipped (v0.1.0-alpha)
 
-- **CLI**: `log`, `recent`, `search`, `count`, `shell`
+- **CLI**: `log`, `recent`, `search`, `count`, `rm`, `shell`
 - **Input**: positional arg, stdin pipe, `--editor` for multi-line composition
 - **Output**: pretty tables by default, `--json` on every command for scripting and agent use
 - **Storage**: local SQLite at `~/.marbles/marbles.db` (single file, no daemon)
