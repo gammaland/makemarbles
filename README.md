@@ -232,6 +232,15 @@ Sync remains optional — the local SQLite is always the source of truth.
 
 ---
 
+## Design decisions
+
+Non-trivial choices are recorded as ADRs in [`docs/adr/`](./docs/adr/). Each one captures the context, the alternatives considered, and the tradeoffs accepted — so a future reader (or contributor) can challenge the decision when conditions change rather than reverse-engineering it from code.
+
+- [**2026-06-03** — Product positioning, open-source strategy, business model](./docs/adr/2026-06-03-product-positioning.md)
+- [**2026-06-13** — Embedding model selection for local semantic search](./docs/adr/2026-06-13-embedding-model.md)
+
+---
+
 ## License
 
 AGPL-3.0-or-later for the client. The future sync server will be closed-source — this is an intentional "open core" split: forks and self-hosting stay open and free; the hosted sync service is the commercial offering.
