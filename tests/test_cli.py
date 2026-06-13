@@ -52,6 +52,32 @@ def test_log_empty_stdin_errors(runner: CliRunner):
     assert result.exit_code != 0
 
 
+def test_log_whitespace_arg_errors(runner: CliRunner):
+    result = runner.invoke(cli_main.app, ["log", "   "])
+    assert result.exit_code != 0
+
+
+def test_log_preserves_multiline_stdin(runner: CliRunner):
+    body = "line one\nline two\nline three"
+    result = runner.invoke(cli_main.app, ["log", "--json"], input=body + "\n")
+    assert result.exit_code == 0
+    assert json.loads(result.stdout.strip())["content"] == body
+
+
+def test_log_preserves_unicode(runner: CliRunner):
+    result = runner.invoke(cli_main.app, ["log", "学习 rust 🦀", "--json"])
+    assert result.exit_code == 0
+    assert json.loads(result.stdout.strip())["content"] == "学习 rust 🦀"
+
+
+def test_search_special_chars_does_not_crash(runner: CliRunner):
+    runner.invoke(cli_main.app, ["log", "C++ async"])
+    result = runner.invoke(cli_main.app, ["search", "C++", "--json"])
+    assert result.exit_code == 0
+    items = json.loads(result.stdout.strip())
+    assert any("C++" in i["content"] for i in items)
+
+
 def test_recent_json_returns_array(runner: CliRunner):
     runner.invoke(cli_main.app, ["log", "first"])
     runner.invoke(cli_main.app, ["log", "second"])

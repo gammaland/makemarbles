@@ -44,3 +44,31 @@ def test_fts_search_finds_keyword(storage: Storage):
     assert "run a marathon in fall" in contents
     assert "weekly review of marathon training" in contents
     assert "learn rust async patterns" not in contents
+
+
+@pytest.mark.parametrize(
+    "query",
+    ["C++", '"unclosed', "AND", "(plan)", "rust*"],
+    ids=["plus", "stray-quote", "reserved-AND", "parens", "star"],
+)
+def test_search_tolerates_fts_special_chars(storage: Storage, query: str):
+    storage.add(Note(content="C++ async patterns"))
+    storage.add(Note(content="plan a marathon"))
+    # Should not raise — user-supplied syntax is escaped to literal phrases.
+    storage.search(query)
+
+
+def test_search_empty_query_returns_empty(storage: Storage):
+    storage.add(Note(content="anything"))
+    assert storage.search("") == []
+    assert storage.search("   ") == []
+
+
+def test_search_multitoken_implicit_and(storage: Storage):
+    storage.add(Note(content="plan a marathon"))
+    storage.add(Note(content="plan a vacation"))
+    storage.add(Note(content="marathon training notes"))
+
+    hits = storage.search("plan marathon")
+    contents = {h.content for h in hits}
+    assert contents == {"plan a marathon"}

@@ -8,6 +8,18 @@ from core.models import Note
 DEFAULT_DB_PATH = Path.home() / ".marbles" / "marbles.db"
 
 
+def _safe_fts_query(raw: str) -> str | None:
+    """Quote each whitespace-separated token as an FTS5 phrase.
+
+    Phrases bypass operator parsing, so 'C++', 'AND', or stray quotes
+    become literal search terms instead of syntax errors. Empty input
+    returns None so callers can short-circuit."""
+    tokens = raw.split()
+    if not tokens:
+        return None
+    return " ".join('"' + t.replace('"', '""') + '"' for t in tokens)
+
+
 class Storage:
     def __init__(self, db_path: Path | None = None):
         self.db_path = db_path or DEFAULT_DB_PATH
@@ -52,7 +64,10 @@ class Storage:
         return [self._to_note(r) for r in rows]
 
     def search(self, query: str, limit: int = 20) -> list[Note]:
-        rows = self.db["notes"].search(query, limit=limit)
+        fts = _safe_fts_query(query)
+        if fts is None:
+            return []
+        rows = self.db["notes"].search(fts, limit=limit)
         return [self._to_note(r) for r in rows]
 
     def count(self) -> int:

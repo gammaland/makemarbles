@@ -52,6 +52,8 @@ def _resolve_content(content: str | None) -> str:
     Rules: explicit text wins; '-' or omitted arg reads stdin. Refuses to
     block on an interactive tty when no content was supplied."""
     if content and content != "-":
+        if not content.strip():
+            raise typer.BadParameter("content is whitespace-only.")
         return content
     if sys.stdin.isatty():
         raise typer.BadParameter(
