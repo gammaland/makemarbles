@@ -1,5 +1,6 @@
+import json
 import shlex
-from datetime import datetime
+import sys
 from typing import Annotated
 
 import typer
@@ -41,24 +42,61 @@ def _render_notes(notes: list[Note], title: str) -> None:
     console.print(table)
 
 
+def _emit_json(payload) -> None:
+    sys.stdout.write(json.dumps(payload, ensure_ascii=False) + "\n")
+
+
+def _resolve_content(content: str | None) -> str:
+    """Resolve note content from arg or stdin.
+
+    Rules: explicit text wins; '-' or omitted arg reads stdin. Refuses to
+    block on an interactive tty when no content was supplied."""
+    if content and content != "-":
+        return content
+    if sys.stdin.isatty():
+        raise typer.BadParameter(
+            "no content provided (pass a string, pipe stdin, or use '-')."
+        )
+    data = sys.stdin.read().strip()
+    if not data:
+        raise typer.BadParameter("stdin was empty.")
+    return data
+
+
 @app.command()
 def log(
-    content: Annotated[str, typer.Argument(help="The note content.")],
+    content: Annotated[
+        str | None,
+        typer.Argument(help="Note content. Omit or use '-' to read from stdin."),
+    ] = None,
     tag: Annotated[str | None, typer.Option("--tag", "-t", help="Optional tag.")] = None,
+    as_json: Annotated[
+        bool, typer.Option("--json", help="Emit the created note as JSON.")
+    ] = False,
 ) -> None:
     """Capture a new note."""
-    note = Note(content=content, tag=tag)
+    text = _resolve_content(content)
+    note = Note(content=text, tag=tag)
     _storage().add(note)
-    console.print(f"[green]✓[/green] {note.id[:8]}  {content}")
+    if as_json:
+        _emit_json(note.model_dump(mode="json"))
+    else:
+        console.print(f"[green]✓[/green] {note.id[:8]}  {text}")
 
 
 @app.command()
 def recent(
     days: Annotated[int, typer.Option("--days", "-d", help="Look back N days.")] = 7,
     limit: Annotated[int, typer.Option("--limit", "-n", help="Max rows to show.")] = 50,
+    as_json: Annotated[
+        bool, typer.Option("--json", help="Emit results as a JSON array.")
+    ] = False,
 ) -> None:
     """Show recent notes (default: last 7 days)."""
     notes = _storage().recent(days=days, limit=limit)
+    if as_json:
+        _emit_json([n.model_dump(mode="json") for n in notes])
+        return
     _render_notes(notes, f"last {days} day(s)")
 
 
@@ -66,16 +104,30 @@ def recent(
 def search(
     query: Annotated[str, typer.Argument(help="FTS5 search query.")],
     limit: Annotated[int, typer.Option("--limit", "-n", help="Max rows to show.")] = 20,
+    as_json: Annotated[
+        bool, typer.Option("--json", help="Emit results as a JSON array.")
+    ] = False,
 ) -> None:
     """Full-text keyword search across notes."""
     notes = _storage().search(query, limit=limit)
+    if as_json:
+        _emit_json([n.model_dump(mode="json") for n in notes])
+        return
     _render_notes(notes, f"matches for {query!r}")
 
 
 @app.command()
-def count() -> None:
+def count(
+    as_json: Annotated[
+        bool, typer.Option("--json", help="Emit count as JSON object.")
+    ] = False,
+) -> None:
     """Print total note count."""
-    console.print(f"[bold]{_storage().count()}[/bold] notes")
+    n = _storage().count()
+    if as_json:
+        _emit_json({"count": n})
+        return
+    console.print(f"[bold]{n}[/bold] notes")
 
 
 def _repl_help() -> None:
