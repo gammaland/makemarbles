@@ -99,6 +99,7 @@ To keep the door open for future model changes and for users who prefer to opt i
 - **Embedding is async by default.** Write path returns immediately; a background task (in-process for the CLI, deferred for the MCP server) populates the vector. Synchronous embedding remains available behind a flag for tests and benchmarks.
 - **Model identity is a config value, not a constant.** `~/.marbles/config.toml` carries the model name; changing it triggers a re-embed pass on next search, not on next write.
 - **`marbles reembed [--model <name>]`** — explicit CLI command to re-vector the entire corpus under a given model. Resumable (skips rows already at the target `embedding_model`), progress-reported, safe to interrupt. This is the user-visible expression of §6.5's "re-embed is routine" contract.
+- **Weight artifacts are exported from `intfloat/multilingual-e5-small` using `optimum-cli`, with int8 quantization.** The export script lives at `tools/export_onnx.py` and is part of the release pipeline. We export ourselves rather than depend on a third-party ONNX mirror so the license chain from upstream is clean for §6.5's mirroring guarantee, and so we can pin the quantization scheme rather than inheriting whatever a third party chose.
 
 These hooks are cheap to add now and absorb almost any future model change without a breaking migration.
 

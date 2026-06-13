@@ -110,15 +110,13 @@ Locked per-component licensing — strategy-driven, not blanket-MIT:
 
 ## Decision 4: GUI Roadmap — Defer Tauri, Ship Textual TUI
 
-**Tauri GUI is deferred.** The user-stated needs (vector indexing progress, data size, quick search, lightweight browse) are information-density problems, not graphical-interaction problems. **Textual (Python TUI framework) covers 100% of stated needs at ~5h vs ~30h for Tauri.**
-
-Also: a low-polish Tauri GUI is a negative signal in interviews — a strong CLI + MCP + TUI stack reads as "developer judgment + dev-experience taste"; a half-baked GUI dilutes that.
+**Tauri GUI is deferred.** The user-stated needs (vector indexing progress, data size, quick search, lightweight browse) are information-density problems, not graphical-interaction problems. **Textual (Python TUI framework) covers 100% of stated needs at ~5h vs ~30h for Tauri.** Building a low-polish GUI also dilutes the CLI + MCP + TUI story for our actual target user; a strong terminal stack is the positioning, a half-finished GUI is not.
 
 **Roadmap update**:
 
 - **v1**: CLI + MCP + Sync (existing 7 phases)
 - **v1.5**: `marbles status` (rich progress + DB size), `marbles tui` (Textual), `marbles digest` (static HTML weekly)
-- **v2 / post-offer**: Reconsider Tauri only if non-developer users emerge as a real segment.
+- **v2**: Reconsider Tauri only if non-developer users emerge as a real segment.
 
 ## Consequences
 
@@ -133,47 +131,3 @@ Also: a low-polish Tauri GUI is a negative signal in interviews — a strong CLI
 - AGPL client may scare a small fraction of corp users. Mitigated by client being end-user software, not embedded library.
 - "Personal knowledge atom layer" positioning is wider than "AI memory" — harder to explain in 5 words but stronger in 30 seconds.
 - $5/mo Pro tier may underprice future enterprise features; consider grandfathering early subscribers.
-
-## Talking points (for behavioral interview §4.5 MakeMarbles deep dive)
-
-1. **Per-component licensing as strategic decision** — "I chose the Bitwarden model not the Notion model, because trust must be verifiable, not assumed."
-2. **Anti-features as positioning** — "We don't build X because Y."
-3. **Framing precision determines competitive landscape** — original "AI memory" framing put us in a crowd; "knowledge atom layer" stakes an empty quadrant.
-4. **Single-device value as product floor** — sync is upsell, not rescue.
-5. **Self-correction as process signal** — initial framing was wrong, recognized via "what's the wedge if sync is paid" stress test, repositioned.
-
-## Master Narrative (for behavioral §4.5 deep dive, locked 2026-06-03)
-
-Opening story (~80 sec, ~260 words), used as the response to "tell me about a project you've worked on outside of work":
-
-> MakeMarbles is a personal knowledge layer that any AI tool can read and write through MCP.
->
-> It started as a personal notes app — low-friction daily capture, with iOS Shortcut input, a UI, and a daily email digest where the AI synthesized a week of context into insights across small wins, health, deep thinking, and action. I gave it to a friend to try. His first question was, "wait — can you see what I write?" That hit harder than any feature request I'd ever gotten. Trust wasn't something I could bolt on. It was the actual product.
->
-> Around the same time, I noticed something else. Whenever I worked with Claude — especially on a self-reflection skill I'd built — the answers stayed general because the AI had no real context on me. Going the other way, the AI sometimes said something I genuinely wanted to keep, and I had nowhere clean to save it. There was a data gap on both sides — into the AI, and out of it.
->
-> The two signals pointed at the same product. Not a trustworthy notes app — a personal knowledge layer, where trust is the foundation and any AI tool can plug in.
->
-> So I rebuilt. Local-first, end-to-end encrypted, client and protocol both open source — so trust is verifiable, not asked for. MCP lets any AI tool tap in without handing my data to a vendor. Free single-device, five bucks a month for sync.
->
-> I use it every day — the bar I hold myself to is that every iteration has to be usable enough that I'd lose data if I stopped. That keeps the rebuild honest.
-
-**Signal density notes:**
-- Two converging independent signals → same root cause = staff-level judgment marker
-- "Trust isn't a feature, it's the product" = decision reframe under user feedback
-- "Data gap on both sides, into the AI and out of it" = dual-channel I/O positioning in spoken form
-- "Verifiable, not asked for" = principled stance on trust as auditability
-- Final quality bar (dogfooding rule) = principal-level self-imposed standard
-
-**Anticipated follow-ups (prep separately):**
-1. Encryption design — how E2E works across multiple devices (asymmetric ingest companions for free tier)
-2. Why MCP specifically — transport choice driven by local-first positioning
-3. Open source moat — what stops a bigger player from forking?
-4. Other features built but cut — voice ingest via Whisper, daily email digest prompt engineering
-
-## References
-
-- `docs/design-decisions.md` — earlier (2026-05-05) design, partially superseded by this ADR
-- `docs/roadmap.md` — phase plan (to be updated to reflect TUI insertion and Tauri deferral)
-- `career_prep/interview_vocab.md` — vocab anchors from this narrative
-- Memory: `project_makemarbles_status.md`, `project_eink_display_idea.md`, `reference_lionote.md`

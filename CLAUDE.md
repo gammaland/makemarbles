@@ -10,7 +10,7 @@ CLI-first tool for zero-friction note capture with semantic search, cross-device
 
 - Python 3.12+, Typer, Rich, Pydantic, httpx
 - SQLite + sqlite-vec (vector search) + FTS5 (keyword search)
-- ONNX Runtime (paraphrase-multilingual-MiniLM-L12-v2)
+- ONNX Runtime (multilingual-e5-small; see `docs/adr/2026-06-13-embedding-model.md`)
 - Cloudflare Durable Objects (sync)
 - AES-256-GCM encryption at rest
 
@@ -20,7 +20,7 @@ CLI-first tool for zero-friction note capture with semantic search, cross-device
 makemarbles/
 ├── core/           # Core logic: models, storage, vector, search, sync, crypto
 ├── cli/            # Typer CLI commands
-├── mcp/            # MCP server (thin CLI wrapper, P2)
+├── marbles_mcp/    # MCP server (FastMCP, thin wrapper over core/)
 ├── worker/         # CF DO sync worker (TypeScript)
 ├── tests/          # pytest
 ├── docs/           # Design docs and decisions
@@ -48,4 +48,4 @@ marbles login                # OAuth Device Flow
 
 ## Detailed Design
 
-See `docs/design-decisions.md` for full architecture rationale.
+See `docs/adr/` for architectural decisions (positioning, embedding model, etc.).

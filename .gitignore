@@ -20,8 +20,5 @@ node_modules/
 .coverage
 htmlcov/
 
-# Personal-facing docs (kept in Chinese, not for public consumption)
-docs/*_learning_notes.md
-docs/design-decisions.md
-docs/mvp_sprint_2026-06.md
-docs/roadmap.md
+# Personal-facing docs (not for public consumption)
+docs/private/
