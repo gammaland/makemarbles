@@ -1,12 +1,19 @@
+import shlex
 from datetime import datetime
 from typing import Annotated
 
 import typer
+from prompt_toolkit import PromptSession
+from prompt_toolkit.completion import WordCompleter
+from prompt_toolkit.history import FileHistory
 from rich.console import Console
 from rich.table import Table
 
 from core.models import Note
 from core.storage import Storage
+
+REPL_COMMANDS = ["log", "recent", "search", "count", "help", "quit", "exit"]
+REPL_HISTORY = "~/.marbles/.shell_history"
 
 app = typer.Typer(
     no_args_is_help=True,
@@ -69,6 +76,64 @@ def search(
 def count() -> None:
     """Print total note count."""
     console.print(f"[bold]{_storage().count()}[/bold] notes")
+
+
+def _repl_help() -> None:
+    console.print(
+        "[bold]Commands inside shell:[/bold]\n"
+        '  [cyan]log[/cyan] "content" [-t tag]   capture a note\n'
+        "  [cyan]recent[/cyan] [--days N] [--limit N]\n"
+        "  [cyan]search[/cyan] <query> [--limit N]\n"
+        "  [cyan]count[/cyan]\n"
+        "  [cyan]help[/cyan]                    show this\n"
+        "  [cyan]quit[/cyan] / [cyan]exit[/cyan] / Ctrl-D    leave"
+    )
+
+
+@app.command()
+def shell() -> None:
+    """Drop into an interactive marbles shell (REPL)."""
+    from pathlib import Path
+
+    history_path = Path(REPL_HISTORY).expanduser()
+    history_path.parent.mkdir(parents=True, exist_ok=True)
+
+    session: PromptSession[str] = PromptSession(
+        history=FileHistory(str(history_path)),
+        completer=WordCompleter(REPL_COMMANDS, ignore_case=True),
+    )
+
+    console.print(
+        "[dim]marbles shell — [bold]help[/bold] for commands, "
+        "[bold]quit[/bold] or Ctrl-D to exit.[/dim]"
+    )
+
+    while True:
+        try:
+            line = session.prompt("marbles> ").strip()
+        except (EOFError, KeyboardInterrupt):
+            console.print()
+            return
+        if not line:
+            continue
+        if line in {"quit", "exit"}:
+            return
+        if line == "help":
+            _repl_help()
+            continue
+        try:
+            argv = shlex.split(line)
+        except ValueError as e:
+            console.print(f"[red]parse error:[/red] {e}")
+            continue
+        try:
+            app(argv, standalone_mode=False)
+        except SystemExit:
+            pass
+        except typer.Exit:
+            pass
+        except Exception as e:
+            console.print(f"[red]error:[/red] {e}")
 
 
 if __name__ == "__main__":
