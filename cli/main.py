@@ -3,6 +3,7 @@ import shlex
 import sys
 from typing import Annotated
 
+import click
 import typer
 from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import WordCompleter
@@ -65,6 +66,25 @@ def _resolve_content(content: str | None) -> str:
     return data
 
 
+EDITOR_TEMPLATE = (
+    "\n"
+    "# Write your note above. Lines starting with '#' are ignored.\n"
+    "# Save and quit to capture. Quit without saving to abort.\n"
+)
+
+
+def _content_from_editor() -> str:
+    raw = click.edit(EDITOR_TEMPLATE, extension=".md")
+    if raw is None:
+        raise typer.BadParameter("editor aborted; nothing captured.")
+    body = "\n".join(
+        line for line in raw.splitlines() if not line.lstrip().startswith("#")
+    ).strip()
+    if not body:
+        raise typer.BadParameter("editor produced empty content.")
+    return body
+
+
 @app.command()
 def log(
     content: Annotated[
@@ -72,18 +92,24 @@ def log(
         typer.Argument(help="Note content. Omit or use '-' to read from stdin."),
     ] = None,
     tag: Annotated[str | None, typer.Option("--tag", "-t", help="Optional tag.")] = None,
+    edit: Annotated[
+        bool,
+        typer.Option("--editor", "-e", help="Compose multi-line note in $EDITOR."),
+    ] = False,
     as_json: Annotated[
         bool, typer.Option("--json", help="Emit the created note as JSON.")
     ] = False,
 ) -> None:
     """Capture a new note."""
-    text = _resolve_content(content)
+    text = _content_from_editor() if edit else _resolve_content(content)
     note = Note(content=text, tag=tag)
     _storage().add(note)
     if as_json:
         _emit_json(note.model_dump(mode="json"))
     else:
-        console.print(f"[green]✓[/green] {note.id[:8]}  {text}")
+        first = text.splitlines()[0] if text else ""
+        suffix = " …" if "\n" in text else ""
+        console.print(f"[green]✓[/green] {note.id[:8]}  {first}{suffix}")
 
 
 @app.command()
@@ -136,6 +162,7 @@ def _repl_help() -> None:
     console.print(
         "[bold]Commands inside shell:[/bold]\n"
         '  [cyan]log[/cyan] "content" [-t tag]   capture a note\n'
+        "  [cyan]log -e[/cyan]                   compose multi-line in $EDITOR\n"
         "  [cyan]recent[/cyan] [--days N] [--limit N]\n"
         "  [cyan]search[/cyan] <query> [--limit N]\n"
         "  [cyan]count[/cyan]\n"

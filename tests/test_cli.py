@@ -70,6 +70,29 @@ def test_log_preserves_unicode(runner: CliRunner):
     assert json.loads(result.stdout.strip())["content"] == "学习 rust 🦀"
 
 
+def test_log_editor_captures_multiline(runner: CliRunner, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(
+        "click.edit",
+        lambda *a, **kw: "first line\nsecond line\n# this comment is dropped\nthird line\n",
+    )
+    result = runner.invoke(cli_main.app, ["log", "-e", "--json"])
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout.strip())
+    assert payload["content"] == "first line\nsecond line\nthird line"
+
+
+def test_log_editor_abort_errors(runner: CliRunner, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr("click.edit", lambda *a, **kw: None)
+    result = runner.invoke(cli_main.app, ["log", "-e"])
+    assert result.exit_code != 0
+
+
+def test_log_editor_empty_errors(runner: CliRunner, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr("click.edit", lambda *a, **kw: "# only a comment\n\n")
+    result = runner.invoke(cli_main.app, ["log", "-e"])
+    assert result.exit_code != 0
+
+
 def test_search_special_chars_does_not_crash(runner: CliRunner):
     runner.invoke(cli_main.app, ["log", "C++ async"])
     result = runner.invoke(cli_main.app, ["search", "C++", "--json"])
