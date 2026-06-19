@@ -36,6 +36,28 @@ class ModelConfig:
     max_length: int = DEFAULT_MAX_LENGTH
 
 
+KNOWN_MODELS: dict[str, ModelConfig] = {
+    "multilingual-e5-small": ModelConfig(
+        name="multilingual-e5-small", dim=384
+    ),
+}
+
+
+def get_known_model(name: str) -> ModelConfig:
+    """Look up a model's static metadata by name.
+
+    Storage uses this to size the vec0 table before any embedding actually
+    runs. Adding a new model means adding an entry here plus an export to
+    GitHub Releases; see docs/adr/2026-06-13-embedding-model.md §10 for the
+    revisit triggers.
+    """
+    if name not in KNOWN_MODELS:
+        raise KeyError(
+            f"Unknown embedding model {name!r}. Add it to core.vector.KNOWN_MODELS."
+        )
+    return KNOWN_MODELS[name]
+
+
 class _NodeArg(Protocol):
     name: str
 

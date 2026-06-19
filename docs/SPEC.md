@@ -59,11 +59,23 @@ update, and delete. User queries are escaped phrase-by-phrase so that operators
 like `AND`, `C++`, or stray quotes become literal terms instead of syntax
 errors.
 
-### 2.3 Vector index `[planned]`
+### 2.3 Vector index `[shipped]`
 
-A `sqlite-vec` virtual table will store one float vector per note for semantic
-search. Dimension and indexing strategy (brute-force flat vs. IVF vs. HNSW) are
-not yet decided; see Section 6.
+A `sqlite-vec` virtual table `notes_vec` stores one L2-normalized float vector
+per note. Schema:
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `note_id` | TEXT PRIMARY KEY | Joins back to `notes.id`. |
+| `embedding` | FLOAT[N] | N is fixed at table creation, taken from the first vector inserted. Today's default (e5-small) means N = 384. |
+
+The table is created lazily on the first `upsert_vector` call. Search is
+brute-force flat KNN, which is the right indexing strategy for the personal-
+scale corpora this product targets (low tens of thousands of notes at most);
+IVF or HNSW would add tuning surface for no perceptible latency improvement at
+this scale. When the configured model changes to a different dimensionality,
+`reset_vector_index()` drops and recreates the table; `upsert_vector` raises
+`VectorDimMismatch` if a caller forgets that step.
 
 ### 2.4 Op log `[designed]`
 
@@ -264,20 +276,25 @@ reference at `docs/private/embedding-stack.md` for the runtime layout
 
 - `core/vector.py` defines `EmbeddingEngine` with `embed_passage` and
   `embed_query` methods, the E5 prefix discipline, attention-masked mean
-  pooling, and L2 normalization. `[shipped, deps pending]`
+  pooling, L2 normalization, and a `KNOWN_MODELS` registry for sizing the
+  vec table. `[shipped]`
 - `core/config.py` reads `~/.marbles/config.toml` for the configured model
   name and models directory. `[shipped]`
 - `notes.embedding_model` and `notes.embedded_at` columns exist. `[shipped]`
+- `notes_vec` sqlite-vec virtual table backs vector storage and KNN search.
+  `Storage.upsert_vector`, `Storage.vector_search`, `Storage.iter_pending_for_embed`,
+  and `Storage.reset_vector_index` form the full lifecycle. `[shipped]`
 - `marbles reembed --dry-run` reports the backlog under the configured model.
   `[shipped]`
-- `tests/test_vector.py` covers prefix discipline, pooling math, normalization,
-  and provider selection through a mocked ONNX session. `[shipped]`
+- 87 unit and integration tests covering the above, including prefix
+  discipline, pooling math, normalization, provider selection (mocked ONNX
+  session), dim-mismatch handling, and model-filtered KNN. `[shipped]`
 
 ### 6.2 Not yet built
 
 - ONNX weight download path (HuggingFace primary, GitHub Releases fallback).
-- `marbles reembed` execution path beyond `--dry-run`.
-- sqlite-vec virtual table and index parameters.
+- `marbles reembed` execution path beyond `--dry-run` (wires `EmbeddingEngine`
+  into the iteration over `iter_pending_for_embed`).
 - Hybrid retrieval (FTS5 + vector via Reciprocal Rank Fusion).
 - The `--semantic` / `--exact` flag pair on `marbles search`.
 

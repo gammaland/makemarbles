@@ -147,3 +147,135 @@ def test_pending_embed_count_excludes_matching_model(storage: Storage):
 
 def test_pending_embed_count_empty_db_is_zero(storage: Storage):
     assert storage.pending_embed_count("multilingual-e5-small") == 0
+
+
+# ---------- vector index (sqlite-vec) ----------
+
+import numpy as np
+
+from core.storage import VectorDimMismatch
+
+
+def _unit_vec(values: list[float]) -> np.ndarray:
+    v = np.array(values, dtype=np.float32)
+    return v / np.linalg.norm(v)
+
+
+def test_vec_table_dim_is_none_before_first_upsert(storage: Storage):
+    assert storage.vec_table_dim() is None
+
+
+def test_upsert_creates_vec_table_on_first_call(storage: Storage):
+    note_id = storage.add(Note(content="hello"))
+    storage.upsert_vector(note_id, _unit_vec([1.0, 0.0, 0.0]), "model-a")
+    assert storage.vec_table_dim() == 3
+
+
+def test_upsert_stamps_embedding_bookkeeping(storage: Storage):
+    note_id = storage.add(Note(content="hello"))
+    storage.upsert_vector(note_id, _unit_vec([1.0, 0.0, 0.0]), "model-a")
+    row = next(storage.db.query(
+        "SELECT embedding_model, embedded_at FROM notes WHERE id = ?", [note_id]
+    ))
+    assert row["embedding_model"] == "model-a"
+    assert row["embedded_at"] is not None
+
+
+def test_upsert_replaces_existing_vector(storage: Storage):
+    note_id = storage.add(Note(content="hello"))
+    storage.upsert_vector(note_id, _unit_vec([1.0, 0.0, 0.0]), "model-a")
+    storage.upsert_vector(note_id, _unit_vec([0.0, 1.0, 0.0]), "model-a")
+    hits = storage.vector_search(_unit_vec([0.0, 1.0, 0.0]), "model-a", limit=1)
+    assert len(hits) == 1
+    assert hits[0][0].id == note_id
+
+
+def test_upsert_dim_mismatch_raises(storage: Storage):
+    note_id = storage.add(Note(content="hello"))
+    storage.upsert_vector(note_id, _unit_vec([1.0, 0.0, 0.0]), "model-a")
+    with pytest.raises(VectorDimMismatch):
+        storage.upsert_vector(note_id, _unit_vec([1.0, 0.0, 0.0, 0.0]), "model-b")
+
+
+def test_vector_search_returns_nearest_first(storage: Storage):
+    a = storage.add(Note(content="east"))
+    b = storage.add(Note(content="north"))
+    c = storage.add(Note(content="up"))
+    storage.upsert_vector(a, _unit_vec([1.0, 0.0, 0.0]), "m")
+    storage.upsert_vector(b, _unit_vec([0.0, 1.0, 0.0]), "m")
+    storage.upsert_vector(c, _unit_vec([0.0, 0.0, 1.0]), "m")
+    hits = storage.vector_search(_unit_vec([0.9, 0.1, 0.0]), "m", limit=3)
+    ids = [n.id for n, _ in hits]
+    assert ids[0] == a
+    # Distances must be sorted ascending.
+    distances = [d for _, d in hits]
+    assert distances == sorted(distances)
+
+
+def test_vector_search_filters_by_model(storage: Storage):
+    a = storage.add(Note(content="under model-a"))
+    b = storage.add(Note(content="under model-b"))
+    storage.upsert_vector(a, _unit_vec([1.0, 0.0, 0.0]), "model-a")
+    # model-b vector lives in the same vec table since dims match, but the
+    # note row records a different model. vector_search must skip it.
+    storage.upsert_vector(b, _unit_vec([1.0, 0.0, 0.0]), "model-b")
+    hits = storage.vector_search(_unit_vec([1.0, 0.0, 0.0]), "model-a", limit=10)
+    assert [n.id for n, _ in hits] == [a]
+
+
+def test_vector_search_returns_empty_when_no_index(storage: Storage):
+    hits = storage.vector_search(_unit_vec([1.0, 0.0, 0.0]), "m", limit=10)
+    assert hits == []
+
+
+def test_iter_pending_for_embed_yields_unembedded_notes(storage: Storage):
+    a = storage.add(Note(content="x"))
+    b = storage.add(Note(content="y"))
+    storage.upsert_vector(a, _unit_vec([1.0, 0.0, 0.0]), "m")
+    pending = list(storage.iter_pending_for_embed("m"))
+    assert {n.id for n in pending} == {b}
+
+
+def test_iter_pending_for_embed_yields_stale_model(storage: Storage):
+    a = storage.add(Note(content="x"))
+    storage.upsert_vector(a, _unit_vec([1.0, 0.0, 0.0]), "old-model")
+    pending = list(storage.iter_pending_for_embed("new-model"))
+    assert [n.id for n in pending] == [a]
+
+
+def test_iter_pending_for_embed_respects_limit(storage: Storage):
+    for i in range(5):
+        storage.add(Note(content=f"n{i}"))
+    pending = list(storage.iter_pending_for_embed("m", limit=2))
+    assert len(pending) == 2
+
+
+def test_reset_vector_index_drops_table_and_clears_metadata(storage: Storage):
+    a = storage.add(Note(content="x"))
+    storage.upsert_vector(a, _unit_vec([1.0, 0.0, 0.0]), "model-a")
+    assert storage.vec_table_dim() == 3
+
+    storage.reset_vector_index()
+    assert storage.vec_table_dim() is None
+    row = next(storage.db.query(
+        "SELECT embedding_model, embedded_at FROM notes WHERE id = ?", [a]
+    ))
+    assert row["embedding_model"] is None
+    assert row["embedded_at"] is None
+
+
+def test_delete_removes_vector_row(storage: Storage):
+    a = storage.add(Note(content="x"))
+    storage.upsert_vector(a, _unit_vec([1.0, 0.0, 0.0]), "m")
+    storage.delete(a)
+    hits = storage.vector_search(_unit_vec([1.0, 0.0, 0.0]), "m", limit=10)
+    assert hits == []
+
+
+def test_reset_then_recreate_with_different_dim(storage: Storage):
+    a = storage.add(Note(content="x"))
+    storage.upsert_vector(a, _unit_vec([1.0, 0.0, 0.0]), "small-model")
+    storage.reset_vector_index()
+    # After reset, a fresh upsert may use any dim.
+    storage.upsert_vector(a, _unit_vec([1.0, 0.0, 0.0, 0.0, 0.0]), "big-model")
+    assert storage.vec_table_dim() == 5
