@@ -352,11 +352,23 @@ write; the writer never tries to be clever about model versioning.
 
 ---
 
-## 7. Sync subsystem `[designed, not built]`
+## 7. Sync subsystem `[crypto primitives shipped; rest designed]`
 
 Phase 2. Builds on Cloudflare Durable Objects as the server runtime. The
 client is local-first: the SQLite file is the source of truth, the server is
 an encrypted relay.
+
+Implementation status as of 2026-06-19:
+
+- `core/crypto.py` ships the cryptographic primitives the rest of §7 will
+  rely on: PBKDF2-SHA256 auth credential derivation (600k iterations),
+  Argon2id encryption key derivation (64 MiB / t=3 / p=1), AES-256-GCM
+  encrypt/decrypt with random 96-bit nonces and AAD binding, and Ed25519
+  per-device signing/verification. 25 tests cover round-trip behavior and
+  tamper detection on every input axis (key, nonce, ciphertext, AAD,
+  message, signature, public key).
+- The op log table, the wire protocol implementation, the CLI commands,
+  and the Cloudflare Durable Objects server are still designed only.
 
 ### 7.1 Op model `[designed]`
 
@@ -393,7 +405,7 @@ writes often enough to pay for them, and the field-level LWW that would
 benefit from finer ordering metadata was deliberately traded away for client
 simplicity.
 
-### 7.3 Identity and device pairing `[designed]`
+### 7.3 Identity and device pairing `[primitives shipped, integration designed]`
 
 Authentication is email plus a master password. The same password derives two
 separate secrets through two separate KDFs:
@@ -431,7 +443,7 @@ private key.
 the data permanently. The registration flow is loud about this. A recovery
 code mechanism is planned for v0.3 once dogfood feedback shows it is needed.
 
-### 7.4 Encryption schema `[designed]`
+### 7.4 Encryption schema `[primitives shipped, op-level integration designed]`
 
 Every op payload is AES-256-GCM-encrypted with the master encryption key K.
 
