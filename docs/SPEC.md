@@ -286,15 +286,30 @@ reference at `docs/private/embedding-stack.md` for the runtime layout
   and `Storage.reset_vector_index` form the full lifecycle. `[shipped]`
 - `marbles reembed --dry-run` reports the backlog under the configured model.
   `[shipped]`
-- 87 unit and integration tests covering the above, including prefix
+- `core/model_download.py` resolves model artifacts from a configurable
+  source chain. The default for `multilingual-e5-small` tries HuggingFace
+  (Xenova ONNX mirror) first and falls back to our own GitHub Releases
+  mirror. Downloads land atomically (stream to `.partial`, optional SHA-256
+  verify, then rename) so an interrupted download cannot leave a half-written
+  weights file behind. `[shipped]`
+- 100 unit and integration tests covering the above, including prefix
   discipline, pooling math, normalization, provider selection (mocked ONNX
-  session), dim-mismatch handling, and model-filtered KNN. `[shipped]`
+  session), dim-mismatch handling, model-filtered KNN, source-chain
+  fallback, SHA-256 verification, partial-file cleanup, and cache reuse.
+  An end-to-end smoke (downloads e5-small from HuggingFace, loads the
+  engine, runs a 4-query retrieval ranking eval) was run manually and
+  returned Recall@2 = 4/4. `[shipped]`
 
 ### 6.2 Not yet built
 
-- ONNX weight download path (HuggingFace primary, GitHub Releases fallback).
 - `marbles reembed` execution path beyond `--dry-run` (wires `EmbeddingEngine`
-  into the iteration over `iter_pending_for_embed`).
+  into the iteration over `iter_pending_for_embed`, with progress reporting
+  via `rich`).
+- Our own GitHub Releases mirror artifact. The fallback URL is registered but
+  empty until v0.2 GA, when `tools/export_onnx.py` lands and we publish a
+  release with the int8-quantized weights as attached files.
+- SHA-256 hashes for the current artifact set. v0.2 alpha skips verification;
+  v0.2 GA pins hashes against the release artifacts we sign ourselves.
 - Hybrid retrieval (FTS5 + vector via Reciprocal Rank Fusion).
 - The `--semantic` / `--exact` flag pair on `marbles search`.
 
