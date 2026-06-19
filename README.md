@@ -216,17 +216,18 @@ After restart, the agent can ask "remember that I decided to use FastMCP" → `a
 - **Output**: pretty tables by default, `--json` on every command for scripting and agent use
 - **MCP server**: `marbles-mcp` with `add_note` + `search_notes` tools (stdio transport)
 - **Storage**: local SQLite at `~/.marbles/marbles.db` (single file, no daemon)
-- **Search**: FTS5 keyword index with Porter stemming + BM25 ranking; user queries are escaped so `C++` and stray operators don't crash
+- **Search**: hybrid by default (FTS5 BM25 + vector cosine via Reciprocal Rank Fusion). `--exact` falls back to FTS5 only; `--semantic` runs vector only. FTS5 has Porter stemming and BM25 ranking, and user queries are escaped so `C++` and stray operators don't crash
+- **Semantic search**: optional local ONNX embedding model (default: multilingual-e5-small, ~470 MB) downloaded on first `marbles reembed`. Vectors stored in a `sqlite-vec` virtual table alongside the notes themselves
 - **IDs**: ULID, sortable by creation time without a separate timestamp column
 
 ## Roadmap
 
 | Version | Adds                                          | Status        |
 | ------- | --------------------------------------------- | ------------- |
-| v0.1    | CLI + FTS5 keyword search + MCP server        | shipped       |
-| v0.2    | Local vector search (ONNX, multilingual)      | planned       |
-| v0.3    | Hybrid retrieval (FTS5 + vector via RRF)      | planned       |
-| v0.4    | Cross-device sync (Cloudflare Durable Objects)| planned       |
+| v0.1    | CLI + FTS5 keyword search + MCP server               | shipped       |
+| v0.2    | Hybrid semantic + keyword search (RRF), cross-device sync (CF DO) | semantic shipped alpha; sync designed, not built |
+| v0.3    | iOS Shortcut writes, key rotation, recovery codes    | planned       |
+| v0.4+   | TUI, AI insight pipeline, hybrid retrieval polish    | planned       |
 
 Sync remains optional. The local SQLite is always the source of truth.
 

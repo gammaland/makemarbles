@@ -163,14 +163,71 @@ def recent(
 
 @app.command()
 def search(
-    query: Annotated[str, typer.Argument(help="FTS5 search query.")],
+    query: Annotated[str, typer.Argument(help="Search query.")],
     limit: Annotated[int, typer.Option("--limit", "-n", help="Max rows to show.")] = 20,
+    semantic: Annotated[
+        bool,
+        typer.Option(
+            "--semantic",
+            help="Vector search only. Requires `marbles reembed` to have run.",
+        ),
+    ] = False,
+    exact: Annotated[
+        bool,
+        typer.Option(
+            "--exact",
+            help="FTS5 keyword search only. Skips the embedding engine entirely.",
+        ),
+    ] = False,
     as_json: Annotated[
         bool, typer.Option("--json", help="Emit results as a JSON array.")
     ] = False,
 ) -> None:
-    """Full-text keyword search across notes."""
-    notes = _storage().search(query, limit=limit)
+    """Search notes. Hybrid (FTS5 + vector via RRF) by default.
+
+    Use `--exact` to force FTS5 only (the v0.1 behavior). Use `--semantic`
+    to force vector only; this requires `marbles reembed` to have populated
+    the vector index first.
+    """
+    if semantic and exact:
+        console.print(
+            "[red]error[/red] --semantic and --exact are mutually exclusive"
+        )
+        raise typer.Exit(2)
+
+    storage = _storage()
+
+    if exact:
+        notes = storage.search(query, limit=limit)
+    else:
+        config = load_config()
+        target = config.embedding.model_name
+        has_vectors = storage.vec_table_dim() is not None
+
+        if semantic and not has_vectors:
+            console.print(
+                "[yellow]no embeddings yet.[/yellow] run "
+                "[bold]marbles reembed[/bold] to enable semantic search."
+            )
+            raise typer.Exit(2)
+
+        embedder = None
+        if semantic or has_vectors:
+            model_dir = config.embedding.models_dir / target
+            _ensure_weights(target, model_dir)
+            embedder = _make_engine(target, model_dir)
+
+        from core.search import hybrid_search, vector_only_search
+
+        if semantic:
+            notes = vector_only_search(
+                storage, query, embedder, target, limit=limit
+            )
+        else:
+            notes = hybrid_search(
+                storage, query, embedder, target, limit=limit
+            )
+
     if as_json:
         _emit_json([n.model_dump(mode="json") for n in notes])
         return

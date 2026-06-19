@@ -125,11 +125,22 @@ List recent notes.
 
 #### `marbles search <query>` `[shipped]`
 
-FTS5 keyword search, ranked by BM25 with Porter stemming. Multi-token queries
-are implicit AND.
+Hybrid search by default. FTS5 keyword and vector cosine are run in parallel
+and combined with Reciprocal Rank Fusion (constant k = 60, the de facto
+standard from the original RRF paper). FTS5 contributes lexical precision;
+the embedding model contributes paraphrase recall.
 
-- `--limit N` (default: 20) Cap.
-- `--json` Emit a JSON array.
+- With no flag, the command runs hybrid when a vector index exists, FTS5
+  alone when it does not. Degradation is silent because `marbles search`
+  must never block on a model download the user did not ask for.
+- `--exact` forces FTS5 only (the v0.1 behavior), bypassing the embedding
+  engine entirely. Use for grep-style lookups.
+- `--semantic` forces vector only. Refuses with a clear hint when
+  `marbles reembed` has not yet populated the index.
+- `--limit N` (default: 20) caps results.
+- `--json` emits a JSON array.
+
+`--semantic` and `--exact` are mutually exclusive.
 
 #### `marbles count` `[shipped]`
 
@@ -298,6 +309,17 @@ reference at `docs/private/embedding-stack.md` for the runtime layout
   the configured model's dimensionality changes. `--dry-run` reports the
   backlog without changing anything; `--json` emits a structured result.
   `[shipped]`
+- `core/search.py` provides `hybrid_search` (Reciprocal Rank Fusion over
+  FTS5 BM25 and vector cosine, k = 60) and `vector_only_search`. Both
+  degrade gracefully: an absent embedder or an empty vec index makes
+  hybrid behave like FTS5, and vector-only returns empty rather than
+  erroring. `[shipped]`
+- `marbles search` defaults to hybrid; `--exact` and `--semantic` flags
+  give the user explicit control over the channel mix. A manual end-to-end
+  smoke with three obviously-paraphrased notes returned the correct top-1
+  match on all three paraphrase queries; the algorithm itself works as
+  designed, the ADR §8 dogfood eval set is what will validate model
+  quality on real personal notes. `[shipped]`
 - `core/model_download.py` resolves model artifacts from a configurable
   source chain. The default for `multilingual-e5-small` tries HuggingFace
   (Xenova ONNX mirror) first and falls back to our own GitHub Releases
@@ -319,8 +341,8 @@ reference at `docs/private/embedding-stack.md` for the runtime layout
   release with the int8-quantized weights as attached files.
 - SHA-256 hashes for the current artifact set. v0.2 alpha skips verification;
   v0.2 GA pins hashes against the release artifacts we sign ourselves.
-- Hybrid retrieval (FTS5 + vector via Reciprocal Rank Fusion).
-- The `--semantic` / `--exact` flag pair on `marbles search`.
+- The ADR §8 dogfood eval set (50 to 100 marbles, 20 paraphrase queries)
+  for empirically validating model quality on real personal notes.
 
 ### 6.3 Embedding model as a config value, not a constant
 

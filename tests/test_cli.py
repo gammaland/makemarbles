@@ -332,3 +332,76 @@ def test_reembed_progress_writes_to_stdout(
     result = runner.invoke(cli_main.app, ["reembed"])
     assert "1" in result.stdout
     assert "multilingual-e5-small" in result.stdout
+
+
+# ---------- search: --semantic / --exact / hybrid default ----------
+
+
+def test_search_default_falls_back_to_fts5_without_vectors(runner: CliRunner):
+    """No reembed run yet => hybrid path degrades silently to FTS5, and
+    nothing tries to download the embedding model."""
+    runner.invoke(cli_main.app, ["log", "kafka rebalance debug"])
+    runner.invoke(cli_main.app, ["log", "weekend baking"])
+    result = runner.invoke(cli_main.app, ["search", "kafka", "--json"])
+    assert result.exit_code == 0
+    items = json.loads(result.stdout.strip())
+    assert [n["content"] for n in items] == ["kafka rebalance debug"]
+
+
+def test_search_exact_flag_uses_fts5_only(
+    runner: CliRunner, stub_embedder: _FakeEngine
+):
+    """--exact must skip the embedding engine even when vectors are present."""
+    runner.invoke(cli_main.app, ["log", "kafka rebalance debug"])
+    runner.invoke(cli_main.app, ["log", "weekend baking"])
+    runner.invoke(cli_main.app, ["reembed"])
+    stub_embedder.calls.clear()
+
+    result = runner.invoke(cli_main.app, ["search", "kafka", "--exact", "--json"])
+    assert result.exit_code == 0
+    items = json.loads(result.stdout.strip())
+    assert [n["content"] for n in items] == ["kafka rebalance debug"]
+    # Embedder must not be called on the exact path.
+    assert stub_embedder.calls == []
+
+
+def test_search_semantic_flag_errors_without_embeddings(runner: CliRunner):
+    runner.invoke(cli_main.app, ["log", "anything"])
+    result = runner.invoke(cli_main.app, ["search", "anything", "--semantic"])
+    assert result.exit_code == 2
+    assert "reembed" in result.stdout.lower()
+
+
+def test_search_semantic_flag_calls_embedder(
+    runner: CliRunner, stub_embedder: _FakeEngine
+):
+    runner.invoke(cli_main.app, ["log", "kafka rebalance debug"])
+    runner.invoke(cli_main.app, ["reembed"])
+    stub_embedder.calls.clear()
+
+    result = runner.invoke(cli_main.app, ["search", "anything", "--semantic", "--json"])
+    assert result.exit_code == 0
+    # Embedder was called to vectorize the query.
+    assert "anything" in stub_embedder.calls
+
+
+def test_search_default_uses_hybrid_path_when_vectors_exist(
+    runner: CliRunner, stub_embedder: _FakeEngine
+):
+    runner.invoke(cli_main.app, ["log", "kafka rebalance debug"])
+    runner.invoke(cli_main.app, ["reembed"])
+    stub_embedder.calls.clear()
+
+    result = runner.invoke(cli_main.app, ["search", "kafka", "--json"])
+    assert result.exit_code == 0
+    # Embedder gets called even when the query is a lexical hit; that is
+    # the cost of the hybrid fusion.
+    assert "kafka" in stub_embedder.calls
+
+
+def test_search_semantic_and_exact_conflict(runner: CliRunner):
+    result = runner.invoke(
+        cli_main.app, ["search", "x", "--semantic", "--exact"]
+    )
+    assert result.exit_code == 2
+    assert "mutually exclusive" in result.stdout.lower()
