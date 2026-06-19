@@ -92,3 +92,58 @@ def test_search_multitoken_implicit_and(storage: Storage):
     hits = storage.search("plan marathon")
     contents = {h.content for h in hits}
     assert contents == {"plan a marathon"}
+
+
+def test_embedding_columns_present_on_fresh_db(storage: Storage):
+    cols = {c.name for c in storage.db["notes"].columns}
+    assert "embedding_model" in cols
+    assert "embedded_at" in cols
+
+
+def test_migration_is_idempotent(storage: Storage):
+    # Re-running _init_schema (e.g. across processes) must not raise.
+    storage._init_schema()
+    storage._init_schema()
+    cols = {c.name for c in storage.db["notes"].columns}
+    assert "embedding_model" in cols
+
+
+def test_migration_adds_columns_to_pre_existing_db(tmp_path):
+    import sqlite_utils
+
+    # Simulate a v0.1 database that pre-dates the embedding columns.
+    db_path = tmp_path / "legacy.db"
+    legacy = sqlite_utils.Database(str(db_path))
+    legacy["notes"].create(
+        {"id": str, "content": str, "tag": str, "created_at": str}, pk="id"
+    )
+    legacy["notes"].enable_fts(
+        ["content", "tag"], create_triggers=True, tokenize="porter unicode61"
+    )
+    cols_before = {c.name for c in legacy["notes"].columns}
+    assert "embedding_model" not in cols_before
+
+    storage = Storage(db_path=db_path)
+    cols_after = {c.name for c in storage.db["notes"].columns}
+    assert "embedding_model" in cols_after
+    assert "embedded_at" in cols_after
+
+
+def test_pending_embed_count_treats_null_as_pending(storage: Storage):
+    storage.add(Note(content="a"))
+    storage.add(Note(content="b"))
+    assert storage.pending_embed_count("multilingual-e5-small") == 2
+
+
+def test_pending_embed_count_excludes_matching_model(storage: Storage):
+    id_a = storage.add(Note(content="a"))
+    storage.add(Note(content="b"))
+    storage.db["notes"].update(id_a, {"embedding_model": "multilingual-e5-small"})
+
+    assert storage.pending_embed_count("multilingual-e5-small") == 1
+    # Different target model => the already-embedded row counts as pending again.
+    assert storage.pending_embed_count("bge-m3") == 2
+
+
+def test_pending_embed_count_empty_db_is_zero(storage: Storage):
+    assert storage.pending_embed_count("multilingual-e5-small") == 0

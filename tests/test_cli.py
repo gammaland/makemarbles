@@ -179,3 +179,53 @@ def test_count_json(runner: CliRunner):
     result = runner.invoke(cli_main.app, ["count", "--json"])
     assert result.exit_code == 0
     assert json.loads(result.stdout.strip()) == {"count": 2}
+
+
+# ---------- reembed ----------
+
+
+def test_reembed_dry_run_reports_full_backlog(runner: CliRunner):
+    runner.invoke(cli_main.app, ["log", "first"])
+    runner.invoke(cli_main.app, ["log", "second"])
+    result = runner.invoke(cli_main.app, ["reembed", "--dry-run"])
+    assert result.exit_code == 0
+    assert "2" in result.stdout
+    assert "pending" in result.stdout
+
+
+def test_reembed_dry_run_zero_on_empty_db(runner: CliRunner):
+    result = runner.invoke(cli_main.app, ["reembed", "--dry-run"])
+    assert result.exit_code == 0
+    assert "current" in result.stdout or "up to date" in result.stdout.lower()
+
+
+def test_reembed_real_path_refuses_until_engine_ships(runner: CliRunner):
+    runner.invoke(cli_main.app, ["log", "needs embedding"])
+    result = runner.invoke(cli_main.app, ["reembed"])
+    assert result.exit_code == 2
+    assert "not yet" in result.stdout.lower() or "v0.2" in result.stdout
+
+
+def test_reembed_real_path_succeeds_when_nothing_pending(runner: CliRunner):
+    # Empty DB => no work needed => clean exit even without --dry-run.
+    result = runner.invoke(cli_main.app, ["reembed"])
+    assert result.exit_code == 0
+
+
+def test_reembed_respects_explicit_model_flag(runner: CliRunner):
+    runner.invoke(cli_main.app, ["log", "one"])
+    result = runner.invoke(
+        cli_main.app, ["reembed", "--model", "bge-m3", "--dry-run", "--json"]
+    )
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout.strip())
+    assert payload == {"model": "bge-m3", "pending": 1, "dry_run": True}
+
+
+def test_reembed_json_real_path_exits_nonzero_when_work_remains(runner: CliRunner):
+    runner.invoke(cli_main.app, ["log", "blocked work"])
+    result = runner.invoke(cli_main.app, ["reembed", "--json"])
+    assert result.exit_code == 2
+    payload = json.loads(result.stdout.strip())
+    assert payload["pending"] == 1
+    assert payload["dry_run"] is False

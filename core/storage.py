@@ -28,15 +28,28 @@ class Storage:
         self._init_schema()
 
     def _init_schema(self) -> None:
-        if "notes" in self.db.table_names():
-            return
-        self.db["notes"].create(
-            {"id": str, "content": str, "tag": str, "created_at": str},
-            pk="id",
-        )
-        self.db["notes"].enable_fts(
-            ["content", "tag"], create_triggers=True, tokenize="porter unicode61"
-        )
+        if "notes" not in self.db.table_names():
+            self.db["notes"].create(
+                {"id": str, "content": str, "tag": str, "created_at": str},
+                pk="id",
+            )
+            self.db["notes"].enable_fts(
+                ["content", "tag"], create_triggers=True, tokenize="porter unicode61"
+            )
+        self._migrate_embedding_columns()
+
+    def _migrate_embedding_columns(self) -> None:
+        """Idempotently add columns the v0.2 semantic-search path needs.
+
+        These are added even before the embedding engine is wired in so
+        that storage and the `reembed --dry-run` command can already speak
+        about pending rows. See docs/adr/2026-06-13-embedding-model.md §7.
+        """
+        existing = {c.name for c in self.db["notes"].columns}
+        if "embedding_model" not in existing:
+            self.db["notes"].add_column("embedding_model", str)
+        if "embedded_at" not in existing:
+            self.db["notes"].add_column("embedded_at", str)
 
     def add(self, note: Note) -> str:
         self.db["notes"].insert(
@@ -72,6 +85,22 @@ class Storage:
 
     def count(self) -> int:
         return self.db["notes"].count
+
+    def pending_embed_count(self, model_name: str) -> int:
+        """Count notes that need (re-)embedding for the given target model.
+
+        Pending = either never embedded, or embedded under a different model.
+        Powers `marbles reembed --dry-run` and progress reporting during
+        a reembed pass.
+        """
+        row = next(
+            self.db.query(
+                "SELECT COUNT(*) AS n FROM notes "
+                "WHERE embedding_model IS NULL OR embedding_model != ?",
+                [model_name],
+            )
+        )
+        return int(row["n"])
 
     def find_by_prefix(self, prefix: str, limit: int = 10) -> list[Note]:
         rows = self.db["notes"].rows_where(

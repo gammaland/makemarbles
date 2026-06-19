@@ -11,10 +11,11 @@ from prompt_toolkit.history import FileHistory
 from rich.console import Console
 from rich.table import Table
 
+from core.config import load_config
 from core.models import Note
 from core.storage import Storage
 
-REPL_COMMANDS = ["log", "recent", "search", "count", "rm", "help", "quit", "exit"]
+REPL_COMMANDS = ["log", "recent", "search", "count", "rm", "reembed", "help", "quit", "exit"]
 REPL_HISTORY = "~/.marbles/.shell_history"
 
 app = typer.Typer(
@@ -200,6 +201,61 @@ def count(
     console.print(f"[bold]{n}[/bold] notes")
 
 
+@app.command()
+def reembed(
+    model: Annotated[
+        str | None,
+        typer.Option(
+            "--model",
+            "-m",
+            help="Target embedding model name. Defaults to the one in ~/.marbles/config.toml.",
+        ),
+    ] = None,
+    dry_run: Annotated[
+        bool,
+        typer.Option("--dry-run", "-n", help="Report pending count without changing anything."),
+    ] = False,
+    as_json: Annotated[
+        bool, typer.Option("--json", help="Emit a JSON object instead of human output.")
+    ] = False,
+) -> None:
+    """Re-vector notes under a given embedding model.
+
+    The full execution path lands in v0.2 once the embedding engine is wired
+    in. For now `--dry-run` already reports how many notes would be
+    (re-)embedded, so the storage migration and config plumbing can be
+    exercised end-to-end.
+    """
+    target = model or load_config().embedding.model_name
+    storage = _storage()
+    pending = storage.pending_embed_count(target)
+
+    if as_json:
+        _emit_json({"model": target, "pending": pending, "dry_run": dry_run})
+        if dry_run or pending == 0:
+            return
+        # JSON mode still exits non-zero when there's nothing to actually do.
+        raise typer.Exit(2)
+
+    if pending == 0:
+        console.print(
+            f"[green]✓ all notes are current[/green] under model [bold]{target}[/bold]"
+        )
+        return
+
+    if dry_run:
+        console.print(
+            f"[yellow]{pending} note(s) pending[/yellow] re-embedding under [bold]{target}[/bold]"
+        )
+        return
+
+    console.print(
+        f"[red]reembed not yet wired up.[/red] {pending} note(s) would be processed under [bold]{target}[/bold].\n"
+        "[dim]The embedding engine ships in v0.2 — until then, use `--dry-run` to inspect the backlog.[/dim]"
+    )
+    raise typer.Exit(2)
+
+
 def _repl_help() -> None:
     console.print(
         "[bold]Commands inside shell:[/bold]\n"
@@ -209,6 +265,7 @@ def _repl_help() -> None:
         "  [cyan]search[/cyan] <query> [--limit N]\n"
         "  [cyan]count[/cyan]\n"
         "  [cyan]rm[/cyan] <id-prefix> [-y]      delete a note\n"
+        "  [cyan]reembed[/cyan] [-m model] [-n]   re-vector under a model (v0.2)\n"
         "  [cyan]help[/cyan]                    show this\n"
         "  [cyan]quit[/cyan] / [cyan]exit[/cyan] / Ctrl-D    leave"
     )
