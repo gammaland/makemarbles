@@ -199,13 +199,6 @@ def test_reembed_dry_run_zero_on_empty_db(runner: CliRunner):
     assert "current" in result.stdout or "up to date" in result.stdout.lower()
 
 
-def test_reembed_real_path_refuses_until_engine_ships(runner: CliRunner):
-    runner.invoke(cli_main.app, ["log", "needs embedding"])
-    result = runner.invoke(cli_main.app, ["reembed"])
-    assert result.exit_code == 2
-    assert "not yet" in result.stdout.lower() or "v0.2" in result.stdout
-
-
 def test_reembed_real_path_succeeds_when_nothing_pending(runner: CliRunner):
     # Empty DB => no work needed => clean exit even without --dry-run.
     result = runner.invoke(cli_main.app, ["reembed"])
@@ -222,10 +215,120 @@ def test_reembed_respects_explicit_model_flag(runner: CliRunner):
     assert payload == {"model": "bge-m3", "pending": 1, "dry_run": True}
 
 
-def test_reembed_json_real_path_exits_nonzero_when_work_remains(runner: CliRunner):
-    runner.invoke(cli_main.app, ["log", "blocked work"])
+# ---------- reembed real execution path (with stubbed downloader + engine) ----------
+
+
+import numpy as np
+
+
+class _FakeEngine:
+    """Deterministic stand-in for EmbeddingEngine. Vectors are based on a
+    hash of the content so two calls for the same note return the same vector
+    (matches the contract real engines obey)."""
+
+    def __init__(self, dim: int = 4) -> None:
+        self.dim = dim
+        self.calls: list[str] = []
+
+    def embed_passage(self, text: str) -> np.ndarray:
+        self.calls.append(text)
+        rng = np.random.default_rng(abs(hash(text)) % (2**32))
+        v = rng.standard_normal(self.dim).astype(np.float32)
+        return v / np.linalg.norm(v)
+
+    def embed_query(self, text: str) -> np.ndarray:
+        return self.embed_passage(text)
+
+
+@pytest.fixture
+def stub_embedder(monkeypatch: pytest.MonkeyPatch) -> _FakeEngine:
+    """Install a fake engine + no-op weight ensurer onto cli.main."""
+    engine = _FakeEngine(dim=4)
+    monkeypatch.setattr(cli_main, "_ensure_weights", lambda name, path: {})
+    monkeypatch.setattr(cli_main, "_make_engine", lambda name, path: engine)
+    monkeypatch.setattr(cli_main, "_model_dim", lambda name: engine.dim)
+    return engine
+
+
+def test_reembed_executes_against_pending_notes(
+    runner: CliRunner, stub_embedder: _FakeEngine
+):
+    runner.invoke(cli_main.app, ["log", "first"])
+    runner.invoke(cli_main.app, ["log", "second"])
+
+    result = runner.invoke(cli_main.app, ["reembed"])
+    assert result.exit_code == 0, result.stdout
+    assert "embedded" in result.stdout.lower()
+    assert {"first", "second"} == set(stub_embedder.calls)
+
+    # Backlog is now zero.
+    after = runner.invoke(cli_main.app, ["reembed", "--dry-run", "--json"])
+    payload = json.loads(after.stdout.strip())
+    assert payload["pending"] == 0
+
+
+def test_reembed_json_emits_processed_count(
+    runner: CliRunner, stub_embedder: _FakeEngine
+):
+    runner.invoke(cli_main.app, ["log", "a"])
+    runner.invoke(cli_main.app, ["log", "b"])
+    runner.invoke(cli_main.app, ["log", "c"])
+
     result = runner.invoke(cli_main.app, ["reembed", "--json"])
-    assert result.exit_code == 2
+    assert result.exit_code == 0, result.stdout
     payload = json.loads(result.stdout.strip())
-    assert payload["pending"] == 1
-    assert payload["dry_run"] is False
+    assert payload == {"model": "multilingual-e5-small", "processed": 3, "dry_run": False}
+
+
+def test_reembed_skips_when_nothing_pending(
+    runner: CliRunner, stub_embedder: _FakeEngine
+):
+    runner.invoke(cli_main.app, ["log", "x"])
+    runner.invoke(cli_main.app, ["reembed"])  # first pass embeds
+    stub_embedder.calls.clear()
+
+    second = runner.invoke(cli_main.app, ["reembed"])
+    assert second.exit_code == 0
+    assert stub_embedder.calls == []  # idempotent
+    assert "current" in second.stdout or "up to date" in second.stdout.lower()
+
+
+def test_reembed_resets_index_when_dim_changes(
+    runner: CliRunner, monkeypatch: pytest.MonkeyPatch, isolated_storage: Path
+):
+    """Embed under a 4-dim model, then switch to a 6-dim model. The CLI
+    should auto-reset the vec table rather than crashing on VectorDimMismatch."""
+    engine_small = _FakeEngine(dim=4)
+    engine_big = _FakeEngine(dim=6)
+    state = {"current": engine_small, "current_dim": 4}
+
+    monkeypatch.setattr(cli_main, "_ensure_weights", lambda n, p: {})
+    monkeypatch.setattr(cli_main, "_make_engine", lambda n, p: state["current"])
+    monkeypatch.setattr(cli_main, "_model_dim", lambda n: state["current_dim"])
+
+    runner.invoke(cli_main.app, ["log", "x"])
+    r1 = runner.invoke(cli_main.app, ["reembed", "--model", "small", "--json"])
+    assert r1.exit_code == 0
+    assert json.loads(r1.stdout.strip())["processed"] == 1
+
+    # Switch to a model with a different dim.
+    state["current"] = engine_big
+    state["current_dim"] = 6
+    r2 = runner.invoke(cli_main.app, ["reembed", "--model", "big", "--json"])
+    assert r2.exit_code == 0
+    assert json.loads(r2.stdout.strip())["processed"] == 1
+
+    # Verify the new index dim matches the new model.
+    storage = Storage(db_path=isolated_storage)
+    assert storage.vec_table_dim() == 6
+
+
+def test_reembed_progress_writes_to_stdout(
+    runner: CliRunner, stub_embedder: _FakeEngine
+):
+    """The rich progress bar renders to whatever console writes to, and the
+    final '✓ embedded' line must always appear regardless of TTY detection."""
+    runner.invoke(cli_main.app, ["log", "z"])
+    result = runner.invoke(cli_main.app, ["reembed"])
+    assert "1" in result.stdout
+    assert "multilingual-e5-small" in result.stdout

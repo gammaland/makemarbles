@@ -148,17 +148,25 @@ verbs as the top-level CLI.
 
 ### 3.2 Semantic search
 
-#### `marbles reembed [--model NAME] [--dry-run]` `[designed, partially built]`
+#### `marbles reembed [--model NAME] [--dry-run]` `[shipped]`
 
 Re-vector notes under a target embedding model.
 
+- With no flags, downloads the model on first use (HuggingFace primary,
+  GitHub Releases mirror fallback) into `~/.marbles/models/<name>/`, loads
+  the engine, and embeds every note whose `embedding_model` is missing or
+  stamped under a different model. Progress is shown via a `rich` bar.
+  Safe to interrupt; resuming picks up where it left off because
+  `iter_pending_for_embed` is computed from `notes.embedding_model` on
+  every call.
 - `--dry-run, -n` reports the pending count without changing anything.
-  `[shipped]`
-- The execution path that actually runs the embedding engine lands in v0.2 and
-  is currently stubbed. It refuses with a clear message instead of producing
-  bad output. See Section 6.
-- `--model, -m NAME` overrides the model configured in `~/.marbles/config.toml`.
-- `--json` Emit `{"model": ..., "pending": N, "dry_run": bool}`.
+- `--model, -m NAME` overrides the model configured in
+  `~/.marbles/config.toml`. Changing to a model with a different
+  dimensionality auto-resets the vec index (notes themselves are
+  untouched; vectors are derived cache per ADR 2026-06-13 §6.5).
+- `--json` emits `{"model": ..., "pending": N, "dry_run": true}` in
+  dry-run mode, or `{"model": ..., "processed": N, "dry_run": false}`
+  after a real pass.
 
 #### `marbles search ... --semantic` `[planned]`
 
@@ -284,7 +292,11 @@ reference at `docs/private/embedding-stack.md` for the runtime layout
 - `notes_vec` sqlite-vec virtual table backs vector storage and KNN search.
   `Storage.upsert_vector`, `Storage.vector_search`, `Storage.iter_pending_for_embed`,
   and `Storage.reset_vector_index` form the full lifecycle. `[shipped]`
-- `marbles reembed --dry-run` reports the backlog under the configured model.
+- `marbles reembed` runs end to end: ensures weights, loads the engine,
+  embeds every pending note with a `rich` progress bar, and stamps the
+  `embedding_model` + `embedded_at` columns. Auto-resets the vec index when
+  the configured model's dimensionality changes. `--dry-run` reports the
+  backlog without changing anything; `--json` emits a structured result.
   `[shipped]`
 - `core/model_download.py` resolves model artifacts from a configurable
   source chain. The default for `multilingual-e5-small` tries HuggingFace
@@ -302,9 +314,6 @@ reference at `docs/private/embedding-stack.md` for the runtime layout
 
 ### 6.2 Not yet built
 
-- `marbles reembed` execution path beyond `--dry-run` (wires `EmbeddingEngine`
-  into the iteration over `iter_pending_for_embed`, with progress reporting
-  via `rich`).
 - Our own GitHub Releases mirror artifact. The fallback URL is registered but
   empty until v0.2 GA, when `tools/export_onnx.py` lands and we publish a
   release with the int8-quantized weights as attached files.

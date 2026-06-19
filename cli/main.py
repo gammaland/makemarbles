@@ -1,6 +1,7 @@
 import json
 import shlex
 import sys
+from pathlib import Path
 from typing import Annotated
 
 import click
@@ -9,11 +10,37 @@ from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import WordCompleter
 from prompt_toolkit.history import FileHistory
 from rich.console import Console
+from rich.progress import (
+    BarColumn,
+    MofNCompleteColumn,
+    Progress,
+    TextColumn,
+    TimeElapsedColumn,
+)
 from rich.table import Table
 
 from core.config import load_config
 from core.models import Note
-from core.storage import Storage
+from core.storage import Storage, VectorDimMismatch
+
+
+# Heavy imports (onnxruntime, tokenizers, numpy) are pushed behind lazy
+# helpers so `marbles log` and the other fast-path commands do not pay the
+# ~half-second import cost of the embedding stack.
+
+def _ensure_weights(model_name: str, model_dir: Path) -> dict[str, str]:
+    from core.model_download import ensure_model_files
+    return ensure_model_files(model_name, model_dir)
+
+
+def _make_engine(model_name: str, model_dir: Path):
+    from core.vector import EmbeddingEngine, get_known_model
+    return EmbeddingEngine(model_dir=model_dir, config=get_known_model(model_name))
+
+
+def _model_dim(model_name: str) -> int:
+    from core.vector import get_known_model
+    return get_known_model(model_name).dim
 
 REPL_COMMANDS = ["log", "recent", "search", "count", "rm", "reembed", "help", "quit", "exit"]
 REPL_HISTORY = "~/.marbles/.shell_history"
@@ -21,7 +48,7 @@ REPL_HISTORY = "~/.marbles/.shell_history"
 app = typer.Typer(
     no_args_is_help=True,
     add_completion=False,
-    help="MakeMarbles — local-first AI journal (CLI + MCP).",
+    help="MakeMarbles: local-first AI journal (CLI + MCP).",
 )
 console = Console()
 
@@ -167,7 +194,7 @@ def rm(
         console.print(f"[red]no note matches[/red] {id_prefix!r}")
         raise typer.Exit(1)
     if len(matches) > 1:
-        console.print(f"[yellow]ambiguous[/yellow] — {len(matches)} notes match:")
+        console.print(f"[yellow]ambiguous[/yellow]: {len(matches)} notes match:")
         for n in matches:
             preview = n.content.splitlines()[0][:60]
             console.print(f"  {n.id[:12]}  {preview}")
@@ -221,39 +248,98 @@ def reembed(
 ) -> None:
     """Re-vector notes under a given embedding model.
 
-    The full execution path lands in v0.2 once the embedding engine is wired
-    in. For now `--dry-run` already reports how many notes would be
-    (re-)embedded, so the storage migration and config plumbing can be
-    exercised end-to-end.
+    With no flags, downloads the model if needed (HuggingFace primary,
+    GitHub Releases mirror fallback), loads the engine, and embeds every
+    note whose vector is missing or stamped under a different model. Safe
+    to interrupt; resuming picks up where it left off.
     """
-    target = model or load_config().embedding.model_name
+    config = load_config()
+    target = model or config.embedding.model_name
     storage = _storage()
     pending = storage.pending_embed_count(target)
 
-    if as_json:
-        _emit_json({"model": target, "pending": pending, "dry_run": dry_run})
-        if dry_run or pending == 0:
+    if dry_run:
+        if as_json:
+            _emit_json({"model": target, "pending": pending, "dry_run": True})
             return
-        # JSON mode still exits non-zero when there's nothing to actually do.
-        raise typer.Exit(2)
+        if pending == 0:
+            console.print(
+                f"[green]✓ all notes are current[/green] under model [bold]{target}[/bold]"
+            )
+        else:
+            console.print(
+                f"[yellow]{pending} note(s) pending[/yellow] re-embedding under [bold]{target}[/bold]"
+            )
+        return
 
     if pending == 0:
+        if as_json:
+            _emit_json({"model": target, "processed": 0, "dry_run": False})
+            return
         console.print(
             f"[green]✓ all notes are current[/green] under model [bold]{target}[/bold]"
         )
         return
 
-    if dry_run:
+    # Reset the vec index if the existing one has a different dimensionality
+    # than the target model needs. Notes themselves are untouched; vectors are
+    # a derived cache (see ADR 2026-06-13 §6.5).
+    target_dim = _model_dim(target)
+    existing_dim = storage.vec_table_dim()
+    if existing_dim is not None and existing_dim != target_dim:
+        if not as_json:
+            console.print(
+                f"[yellow]vec index is dim {existing_dim}, model [bold]{target}[/bold] "
+                f"needs {target_dim}; resetting cache (notes are unaffected).[/yellow]"
+            )
+        storage.reset_vector_index()
+        pending = storage.pending_embed_count(target)
+
+    model_dir = config.embedding.models_dir / target
+    if not as_json:
         console.print(
-            f"[yellow]{pending} note(s) pending[/yellow] re-embedding under [bold]{target}[/bold]"
+            f"[dim]Ensuring weights for [bold]{target}[/bold] under {model_dir} ...[/dim]"
+        )
+    _ensure_weights(target, model_dir)
+    engine = _make_engine(target, model_dir)
+
+    processed = 0
+    if as_json:
+        for note in storage.iter_pending_for_embed(target):
+            vec = engine.embed_passage(note.content)
+            try:
+                storage.upsert_vector(note.id, vec, target)
+            except VectorDimMismatch:
+                # Should not happen given the pre-check above, but guard so a
+                # mid-loop reset does not silently corrupt the run.
+                storage.reset_vector_index()
+                storage.upsert_vector(note.id, vec, target)
+            processed += 1
+        _emit_json(
+            {"model": target, "processed": processed, "dry_run": False}
         )
         return
 
+    progress_columns = [
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        MofNCompleteColumn(),
+        TimeElapsedColumn(),
+    ]
+    with Progress(*progress_columns, console=console) as progress:
+        task = progress.add_task(f"embedding under {target}", total=pending)
+        for note in storage.iter_pending_for_embed(target):
+            vec = engine.embed_passage(note.content)
+            try:
+                storage.upsert_vector(note.id, vec, target)
+            except VectorDimMismatch:
+                storage.reset_vector_index()
+                storage.upsert_vector(note.id, vec, target)
+            processed += 1
+            progress.update(task, advance=1)
     console.print(
-        f"[red]reembed not yet wired up.[/red] {pending} note(s) would be processed under [bold]{target}[/bold].\n"
-        "[dim]The embedding engine ships in v0.2 — until then, use `--dry-run` to inspect the backlog.[/dim]"
+        f"[green]✓ embedded[/green] {processed} note(s) under [bold]{target}[/bold]"
     )
-    raise typer.Exit(2)
 
 
 def _repl_help() -> None:
@@ -285,7 +371,7 @@ def shell() -> None:
     )
 
     console.print(
-        "[dim]marbles shell — [bold]help[/bold] for commands, "
+        "[dim]marbles shell. [bold]help[/bold] for commands, "
         "[bold]quit[/bold] or Ctrl-D to exit.[/dim]"
     )
 
