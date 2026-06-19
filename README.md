@@ -1,6 +1,6 @@
 # MakeMarbles
 
-> Local-first AI journal with dual-channel I/O — human via CLI, LLM agents via MCP.
+> Local-first AI journal with dual-channel I/O: human via CLI, LLM agents via MCP.
 
 **Status**: `v0.1.0-alpha` · Python 3.12+ · AGPL-3.0-or-later
 
@@ -8,7 +8,7 @@
 
 ## Why
 
-You are talking to an LLM agent in your terminal. A relevant thought hits — about the project, a meeting earlier, a half-baked idea. You don't want to break flow to open a notes app, find the right vault, type, and switch back. Tomorrow, in a fresh agent session, you want that thought retrievable — by you, and by the agent itself.
+You are talking to an LLM agent in your terminal. A relevant thought hits, about the project, a meeting earlier, a half-baked idea. You don't want to break flow to open a notes app, find the right vault, type, and switch back. Tomorrow, in a fresh agent session, you want that thought retrievable, by you and by the agent itself.
 
 The problem MakeMarbles addresses: **frictionless capture from the shell, durable retrieval by both human and AI agent, with notes stored locally as the source of truth.**
 
@@ -28,8 +28,8 @@ MakeMarbles makes a narrow bet: **the user is comfortable in a terminal, spends 
 
 The two I/O channels share one implementation:
 
-- **Human channel** — a CLI you call from a shell alias, terminal, or iOS Shortcut.
-- **LLM channel** — an MCP server exposing the same operations as tools, so agents capture and search inside their own context.
+- **Human channel**: a CLI you call from a shell alias, terminal, or iOS Shortcut.
+- **LLM channel**: an MCP server exposing the same operations as tools, so agents capture and search inside their own context.
 
 No API contract drift, no background daemon, no cloud round-trip.
 
@@ -62,7 +62,7 @@ No API contract drift, no background daemon, no cloud round-trip.
               └─────────────────────┘
 ```
 
-The MCP server is a **thin wrapper over the same `core/` module the CLI uses** — same code path, no parallel implementation to drift.
+The MCP server is a **thin wrapper over the same `core/` module the CLI uses**: same code path, no parallel implementation to drift.
 
 ---
 
@@ -117,25 +117,25 @@ $ marbles search "hybrid"
 `marbles log` accepts content through five paths. Pick whichever fits the moment:
 
 ```bash
-# 1. Editor — opens $EDITOR (vim/nano/code) with a markdown template.
+# 1. Editor: opens $EDITOR (vim/nano/code) with a markdown template.
 #    Lines starting with '#' are stripped, git-commit style. Best for prose.
 marbles log -e
 
-# 2. Pipe — anything on stdin becomes the note body, newlines preserved.
+# 2. Pipe: anything on stdin becomes the note body, newlines preserved.
 printf 'line one\nline two\n' | marbles log
 git log -1 --pretty=%B | marbles log -t commit
 
-# 3. Heredoc — single-shot block from the shell.
+# 3. Heredoc: single-shot block from the shell.
 marbles log "$(cat <<'EOF'
 para one
 para two with **markdown**
 EOF
 )"
 
-# 4. File redirect — turn an existing draft into a note.
+# 4. File redirect: turn an existing draft into a note.
 marbles log < draft.md
 
-# 5. Shell escapes — zsh/bash $'...' interprets \n.
+# 5. Shell escapes: zsh/bash $'...' interprets \n.
 marbles log $'quick\nmulti-line\nthought'
 ```
 
@@ -148,7 +148,7 @@ $ marbles log "shipping notes" --json
 $ marbles search "marathon" --json | jq '.[].content'
 ```
 
-Prefer staying in one session? `marbles shell` drops into an interactive REPL with command history and tab completion — `log -e` works inside it too.
+Prefer staying in one session? `marbles shell` drops into an interactive REPL with command history and tab completion. `log -e` works inside it too.
 
 ## Deleting notes
 
@@ -168,7 +168,7 @@ Pass `-y` to skip confirmation; non-tty contexts (pipes, agents) skip it automat
 
 ---
 
-## MCP server — wire marbles into your agent
+## MCP server: wire marbles into your agent
 
 `marbles-mcp` exposes two tools to any MCP-compatible client (Claude Desktop, Claude Code, Cursor, Cline, Continue):
 
@@ -177,7 +177,7 @@ Pass `-y` to skip confirmation; non-tty contexts (pipes, agents) skip it automat
 | `add_note`     | `add_note(content: str, tag: str \| None)`      | Capture a marble from inside the agent  |
 | `search_notes` | `search_notes(query: str, limit: int = 10)`     | Recall prior context before answering   |
 
-Both tools share the same `core/` storage as the CLI — no parallel implementation, no schema drift.
+Both tools share the same `core/` storage as the CLI. No parallel implementation, no schema drift.
 
 ### Install
 
@@ -217,7 +217,7 @@ After restart, the agent can ask "remember that I decided to use FastMCP" → `a
 - **MCP server**: `marbles-mcp` with `add_note` + `search_notes` tools (stdio transport)
 - **Storage**: local SQLite at `~/.marbles/marbles.db` (single file, no daemon)
 - **Search**: FTS5 keyword index with Porter stemming + BM25 ranking; user queries are escaped so `C++` and stray operators don't crash
-- **IDs**: ULID — sortable by creation time without a separate timestamp column
+- **IDs**: ULID, sortable by creation time without a separate timestamp column
 
 ## Roadmap
 
@@ -228,7 +228,7 @@ After restart, the agent can ask "remember that I decided to use FastMCP" → `a
 | v0.3    | Hybrid retrieval (FTS5 + vector via RRF)      | planned       |
 | v0.4    | Cross-device sync (Cloudflare Durable Objects)| planned       |
 
-Sync remains optional — the local SQLite is always the source of truth.
+Sync remains optional. The local SQLite is always the source of truth.
 
 ---
 
@@ -243,4 +243,4 @@ Sync remains optional — the local SQLite is always the source of truth.
 
 ## License
 
-AGPL-3.0-or-later for the client. The future sync server will be closed-source — this is an intentional "open core" split: forks and self-hosting stay open and free; the hosted sync service is the commercial offering.
+AGPL-3.0-or-later for the client. The future sync server will be closed-source. This is an intentional "open core" split: forks and self-hosting stay open and free; the hosted sync service is the commercial offering.
