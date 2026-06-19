@@ -232,12 +232,12 @@ Sync remains optional — the local SQLite is always the source of truth.
 
 ---
 
-## Design decisions
+## Technical docs
 
-Non-trivial choices are recorded as ADRs in [`docs/adr/`](./docs/adr/). Each one captures the context, the alternatives considered, and the tradeoffs accepted — so a future reader (or contributor) can challenge the decision when conditions change rather than reverse-engineering it from code.
-
-- [**2026-06-03** — Product positioning, open-source strategy, business model](./docs/adr/2026-06-03-product-positioning.md)
-- [**2026-06-13** — Embedding model selection for local semantic search](./docs/adr/2026-06-13-embedding-model.md)
+- [**`docs/SPEC.md`**](./docs/SPEC.md) is the single source of truth for the system's current shape. Every CLI command, MCP tool, schema column, and sync protocol detail is recorded there with an explicit status tag (shipped, designed, in design, planned, out of scope).
+- [**`docs/adr/`**](./docs/adr/) holds the per-decision records that feed into the SPEC. Each one captures the context, the alternatives considered, and the tradeoffs accepted, so a future reader (or contributor) can challenge the decision when conditions change rather than reverse-engineering it from code.
+  - [**2026-06-03** Product positioning, open-source strategy, business model](./docs/adr/2026-06-03-product-positioning.md)
+  - [**2026-06-13** Embedding model selection for local semantic search](./docs/adr/2026-06-13-embedding-model.md)
 
 ---
 
