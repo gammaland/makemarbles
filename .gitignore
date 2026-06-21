@@ -20,5 +20,8 @@ node_modules/
 .coverage
 htmlcov/
 
+# macOS
+.DS_Store
+
 # Personal-facing docs (not for public consumption)
 docs/private/
