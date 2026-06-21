@@ -380,9 +380,16 @@ Implementation status as of 2026-06-21:
 - `core/oplog.py` + the `ops` table ship the local op log (§7.1). Every note
   insert/delete atomically appends one op; payloads are stored in plaintext
   locally and have no crypto/network dependency. See §7.1.
-- The wire protocol implementation, the CLI commands (`login`, `sync`,
-  `devices`), and the Cloudflare Durable Objects server are still designed
-  only.
+- `core/wire.py` + `core/sync.py` ship the **client push pipeline** (§7.4/§7.5):
+  `pack_push` seals one op into an encrypted (AES-256-GCM, AAD-bound) and
+  signed (Ed25519) envelope; `unpack_and_verify` is the verify-then-decrypt
+  inverse a pulling peer runs; `push_backlog` drains `unsynced_ops()` over a
+  `Transport` and records each server-assigned op_id. All testable with no
+  server (a fake transport verifies + decrypts like a peer). See `docs/private/
+  sync-crypto.md` for the full mechanism / security argument / comparison.
+- Still designed only: the real transport (Cloudflare Durable Objects server),
+  the `login` handshake that produces the `Identity` bundle, the `sync` /
+  `devices` CLI commands, and pull/replay back into the local tables.
 
 ### 7.1 Op model `[local log shipped; server replay designed]`
 
@@ -476,9 +483,12 @@ private key.
 the data permanently. The registration flow is loud about this. A recovery
 code mechanism is planned for v0.3 once dogfood feedback shows it is needed.
 
-### 7.4 Encryption schema `[primitives shipped, op-level integration designed]`
+### 7.4 Encryption schema `[shipped — client codec in core/wire.py]`
 
 Every op payload is AES-256-GCM-encrypted with the master encryption key K.
+The plaintext sealed is `{"type": <op_type>, "payload": <op payload>}`, so the
+op type and note_id ride inside the ciphertext and are invisible to the server
+(§7.6). See `docs/private/sync-crypto.md` for the end-to-end walkthrough.
 
 - **Nonce**: 96 bits, freshly random per op. At 10 thousand ops per day the
   expected time until a nonce collision under random sampling exceeds the age
@@ -501,7 +511,12 @@ silently drop or reorder accepted ops; we accept that exposure in v0.2 in
 exchange for a much simpler protocol. We do trust the server not to forge
 content, because content goes through the GCM tag and the device signature.
 
-### 7.5 Wire format `[designed]`
+### 7.5 Wire format `[client side shipped; transport designed]`
+
+The push/pull envelope codec is implemented in `core/wire.py` (`pack_push` /
+`unpack_and_verify`) and the client push loop in `core/sync.py`
+(`push_backlog` over a `Transport` protocol). The concrete transport — the
+WebSocket / `GET /ops?after=` server — is still designed only.
 
 Push (client to server):
 
