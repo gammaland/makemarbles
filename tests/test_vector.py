@@ -29,8 +29,10 @@ from core.vector import (
     QUERY_PREFIX,
     EmbeddingEngine,
     ModelConfig,
+    _cls_pool_and_normalize,
     _mean_pool_and_normalize,
     _select_providers,
+    get_known_model,
 )
 
 
@@ -188,6 +190,70 @@ def test_mean_pool_handles_all_zero_mask_without_crashing():
     pooled = _mean_pool_and_normalize(last_hidden, mask)
     assert pooled.shape == (1, 4)
     assert not np.isnan(pooled).any()
+
+
+# ---------- cls pooling (BGE-style) and per-model config ----------
+
+
+def test_cls_pool_takes_first_token_and_normalizes():
+    # First token points +x; later tokens point +y. CLS pooling must keep the
+    # first token's direction, not the average.
+    last_hidden = np.array([[[2.0, 0.0], [0.0, 9.0], [0.0, 9.0]]])  # (1, 3, 2)
+    pooled = _cls_pool_and_normalize(last_hidden)
+    assert np.allclose(pooled, np.array([[1.0, 0.0]]))
+
+
+class _FixedSession:
+    """Returns a fixed, non-parallel last_hidden so mean and cls pooling differ."""
+
+    def get_inputs(self) -> list[FakeInput]:
+        return [FakeInput(name="input_ids"), FakeInput(name="attention_mask")]
+
+    def run(self, output_names, input_feed):  # noqa: ANN001
+        # token 0 -> +x, tokens 1..3 -> +y; mean leans +y, cls stays +x.
+        lh = np.array([[[5.0, 0.0], [0.0, 1.0], [0.0, 1.0], [0.0, 1.0]]])
+        return [lh]
+
+
+def test_engine_dispatches_to_cls_pooling_when_configured():
+    session = _FixedSession()
+    eng_cls = EmbeddingEngine(
+        model_dir=Path("/nonexistent"),
+        config=ModelConfig(name="m", dim=2, pooling="cls"),
+        session=session,
+        tokenizer=FakeTokenizer(),
+    )
+    eng_mean = EmbeddingEngine(
+        model_dir=Path("/nonexistent"),
+        config=ModelConfig(name="m", dim=2, pooling="mean"),
+        session=session,
+        tokenizer=FakeTokenizer(),
+    )
+    v_cls = eng_cls.embed_passage("x")
+    v_mean = eng_mean.embed_passage("x")
+    assert np.allclose(v_cls, np.array([1.0, 0.0]))  # first-token direction
+    assert not np.allclose(v_cls, v_mean)
+
+
+def test_empty_prefix_model_does_not_prepend_anything():
+    tok = FakeTokenizer()
+    engine = EmbeddingEngine(
+        model_dir=Path("/nonexistent"),
+        config=ModelConfig(name="m", dim=3, query_prefix="", passage_prefix=""),
+        session=FakeSession(dim=3),
+        tokenizer=tok,
+    )
+    engine.embed_passage("raw note")
+    assert tok.last_text == "raw note"
+    engine.embed_query("raw query")
+    assert tok.last_text == "raw query"
+
+
+def test_known_models_registry_carries_benchmark_alternatives():
+    mini = get_known_model("paraphrase-multilingual-MiniLM-L12-v2")
+    assert mini.dim == 384 and mini.pooling == "mean" and mini.query_prefix == ""
+    bge = get_known_model("bge-m3")
+    assert bge.dim == 1024 and bge.pooling == "cls" and bge.passage_prefix == ""
 
 
 # ---------- session feed construction ----------

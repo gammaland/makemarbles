@@ -144,49 +144,66 @@ of the user's *own* notes with hand-labeled relevance) is run privately against
 `~/.marbles` and is not committed. Treat these numbers as a pipeline smoke
 signal, not a model-quality verdict. 50 notes (EN / ZH / mixed), 25 labeled
 queries: 20 paraphrase minimal pairs built with little-to-no surface-token
-overlap with their gold note, plus 5 lexical-overlap controls. Model:
-**multilingual-e5-small**.
+overlap with their gold note, plus 5 lexical-overlap controls.
 
-| group | n | channel | Recall@5 | Recall@10 | MRR |
-|---|---|---|---|---|---|
-| paraphrase (no token overlap) | 20 | fts | 0.00 | 0.00 | 0.00 |
-| | | vector | 0.95 | 0.95 | 0.87 |
-| | | hybrid | 0.95 | 0.95 | 0.87 |
-| lexical (token overlap) | 5 | fts | 0.60 | 0.60 | 0.60 |
-| | | vector | 1.00 | 1.00 | 1.00 |
-| | | hybrid | 1.00 | 1.00 | 1.00 |
-| overall | 25 | fts | 0.12 | 0.12 | 0.12 |
-| | | vector | 0.96 | 0.96 | 0.90 |
-| | | hybrid | 0.96 | 0.96 | 0.90 |
+**Phase 4 claim, on the default (multilingual-e5-small).** On the paraphrase set
+the lexical channel recalls *nothing* (0.00 by construction) while the dense
+channel recalls 95% at both rank 5 and rank 10 — including cross-lingual pairs.
+That is the acceptance claim demonstrated: notes with no token overlap to the
+query are retrieved on meaning alone. The FTS5 baseline (model-independent) is
+paraphrase 0.00, lexical 0.60, overall 0.12. **Hybrid == vector across the board**
+because RRF here is a safety net, not a booster: FTS contributes nothing to fuse
+on paraphrase queries, and the dense channel already nails the lexical controls
+(hybrid holds 1.00 where FTS alone reaches only 0.60, i.e. it does not regress).
 
-**Read of the result.** On the paraphrase set the lexical channel recalls
-*nothing* (0.00 by construction), while the dense channel recalls 95% at both
-rank 5 and rank 10 — including cross-lingual pairs (EN query → ZH note and a
-ZH note + EN note sharing one gold). That is the Phase 4 acceptance claim
-demonstrated: notes with no token overlap to the query are retrieved on meaning
-alone.
+**Head-to-head (§8 step 2), dense channel, on the same set.** All three models
+were run through the identical harness via `--model`; only the paraphrase group
+discriminates (the lexical group saturates at 1.00 for every model).
 
-**Hybrid == vector on this set, and that is expected.** RRF here is a safety
-net, not a booster: on paraphrase queries FTS contributes nothing to fuse, and
-on the lexical controls the dense channel already nails the gold note, so
-fusion has no headroom to add. The control group shows hybrid does not *regress*
-on easy keyword hits — it stays at 1.00 even where FTS alone only reaches 0.60.
-A set where one channel is strong and the other weak *per query* would be needed
-to show fusion lifting a result above either channel alone; that is future work.
+| model | dim | pool | disk | embed p50 / p95 | para R@5 | para R@10 | para MRR | overall MRR |
+|---|---|---|---|---|---|---|---|---|
+| multilingual-e5-small **(default)** | 384 | mean | 465 MB | 45 / 68 ms | 0.95 | 0.95 | 0.872 | 0.898 |
+| paraphrase-multilingual-MiniLM-L12-v2 | 384 | mean | 465 MB | 39 / 65 ms | 1.00 | 1.00 | 0.902 | 0.921 |
+| bge-m3 | 1024 | cls | 2.1 GB | 243 / 312 ms | 1.00 | 1.00 | 0.929 | 0.943 |
 
-**One hybrid miss** (gold outside top 10): the EN-query → ZH-note cross-lingual
-bread-proofing pair (`n16`). Cross-lingual EN→ZH is the model's weakest axis at
-this size, consistent with §9's "good enough, not perfect" caveat. One miss in
-25 is within tolerance for a ~110 MB model.
+Latency is single-note `embed_passage`, warm, 50 samples, Apple Silicon arm64,
+CoreML EP available. (x86 latency still pending.)
 
-**Latency** (single-note `embed_passage`, warm, Apple Silicon arm64,
-CoreML EP available): p50 **45 ms**, p95 **68 ms** over 50 samples.
+**Read of the head-to-head — honest, and it complicates the default.**
+
+- Quality orders bge-m3 ≥ MiniLM ≥ e5-small, but on this small, easy set R@5/@10
+  already saturate for the top two and the MRR gaps are within noise for 20
+  queries. e5-small's one miss is the EN→ZH cross-lingual bread pair (`n16`),
+  consistent with §9's "good enough, not perfect" on language-switching content;
+  MiniLM and bge-m3 both catch it.
+- **e5-small is not *materially better* than MiniLM here — it is marginally
+  worse.** Per §8's own decision rule ("if e5-small is not materially better than
+  MiniLM, we drop to MiniLM, smaller/simpler"), that is a genuine revisit signal.
+  Two caveats blunt it: (a) 20 synthetic queries are far too thin to flip a
+  shipped default — the *real-dogfood* eval is the proper decider; and (b) MiniLM
+  is **not** actually smaller on disk (both 465 MB fp32, both 384-dim), so the
+  "smaller/simpler" half of §8's tie-breaker barely applies.
+- bge-m3 buys the best ranking (MRR) but costs ~4.5x the disk and ~5.5x the
+  latency for gains that saturate on this set. At personal scale that fails §9's
+  "the bar is high" test for a default. It stays a non-default, power-user option,
+  now loadable via `marbles reembed --model bge-m3`. Validating it also exercised
+  CLS pooling (vs the E5/MiniLM mean pooling), confirming the engine handles both.
+
+**Decision (unchanged, but now explicitly provisional).** The shipped default
+stays **multilingual-e5-small**. e5-small vs MiniLM is reclassified from "settled"
+to an **open question to resolve on real dogfood notes**, not synthetic ones.
+Nothing here clears that bar yet.
 
 **Still pending for the full §8 bar:** the private dogfood run on 50–100 real
-notes, the head-to-head against paraphrase-multilingual-MiniLM-L12-v2 and bge-m3
-(requires downloading both), and x86 latency numbers. The decision to ship
-e5-small as the default stands on this pipeline evidence; it is not yet
-GA-validated against the cheaper/heavier alternatives.
+notes, and x86 latency numbers.
+
+**Reproduce:**
+
+```
+python tools/eval_semantic.py --model multilingual-e5-small
+python tools/eval_semantic.py --model paraphrase-multilingual-MiniLM-L12-v2
+python tools/eval_semantic.py --model bge-m3
+```
 
 ---
 

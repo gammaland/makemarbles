@@ -29,16 +29,43 @@ DEFAULT_MAX_LENGTH = 512
 
 @dataclass(frozen=True)
 class ModelConfig:
-    """Static metadata about a loaded embedding model."""
+    """Static metadata about a loaded embedding model.
+
+    `query_prefix` / `passage_prefix` carry the instruction discipline the model
+    was trained with. E5 needs "query: " / "passage: "; sentence-transformers
+    paraphrase models and BGE use no prefix. `pooling` selects how token vectors
+    collapse to one: "mean" (E5, MiniLM) or "cls" (BGE takes the first token).
+    Defaults preserve the original E5 behavior so existing callers are unchanged.
+    """
 
     name: str
     dim: int
     max_length: int = DEFAULT_MAX_LENGTH
+    query_prefix: str = QUERY_PREFIX
+    passage_prefix: str = PASSAGE_PREFIX
+    pooling: str = "mean"
 
 
 KNOWN_MODELS: dict[str, ModelConfig] = {
     "multilingual-e5-small": ModelConfig(
         name="multilingual-e5-small", dim=384
+    ),
+    # Benchmark alternatives from ADR 2026-06-13 §8. Registered so
+    # `marbles reembed --model <name>` and the eval harness can load them;
+    # the shipped default stays multilingual-e5-small.
+    "paraphrase-multilingual-MiniLM-L12-v2": ModelConfig(
+        name="paraphrase-multilingual-MiniLM-L12-v2",
+        dim=384,
+        query_prefix="",
+        passage_prefix="",
+        pooling="mean",
+    ),
+    "bge-m3": ModelConfig(
+        name="bge-m3",
+        dim=1024,
+        query_prefix="",
+        passage_prefix="",
+        pooling="cls",
     ),
 }
 
@@ -111,6 +138,17 @@ def _mean_pool_and_normalize(
     return pooled / norms
 
 
+def _cls_pool_and_normalize(last_hidden: np.ndarray) -> np.ndarray:
+    """Take the first ([CLS]) token's hidden state, then L2 normalize.
+
+    BGE-family models put the sequence representation in position 0 rather than
+    averaging over tokens. last_hidden: (B, T, D) -> (B, D), each row unit-norm.
+    """
+    pooled = last_hidden[:, 0, :]
+    norms = np.linalg.norm(pooled, axis=1, keepdims=True).clip(min=1e-9)
+    return pooled / norms
+
+
 class EmbeddingEngine:
     """Produces unit-normalized embeddings for marbles using an E5-family model."""
 
@@ -142,12 +180,12 @@ class EmbeddingEngine:
         self.session = session
 
     def embed_passage(self, text: str) -> np.ndarray:
-        """Embed a note for storage. Uses E5's 'passage:' prefix."""
-        return self._embed(PASSAGE_PREFIX + text)
+        """Embed a note for storage. Prepends the model's passage prefix."""
+        return self._embed(self.config.passage_prefix + text)
 
     def embed_query(self, text: str) -> np.ndarray:
-        """Embed a search query. Uses E5's 'query:' prefix."""
-        return self._embed(QUERY_PREFIX + text)
+        """Embed a search query. Prepends the model's query prefix."""
+        return self._embed(self.config.query_prefix + text)
 
     def _embed(self, prepared_text: str) -> np.ndarray:
         enc = self.tokenizer.encode(prepared_text)
@@ -162,5 +200,8 @@ class EmbeddingEngine:
         if any(i.name == "token_type_ids" for i in self.session.get_inputs()):
             feeds["token_type_ids"] = np.zeros_like(input_ids)
         (last_hidden,) = self.session.run(["last_hidden_state"], feeds)
-        pooled = _mean_pool_and_normalize(last_hidden, attention_mask)
+        if self.config.pooling == "cls":
+            pooled = _cls_pool_and_normalize(last_hidden)
+        else:
+            pooled = _mean_pool_and_normalize(last_hidden, attention_mask)
         return pooled[0]

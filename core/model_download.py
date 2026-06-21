@@ -67,6 +67,35 @@ MODEL_SPECS: dict[str, ModelSpec] = {
             ),
         ),
     ),
+    # Benchmark alternatives (ADR 2026-06-13 §8). HF only; we do not mirror
+    # models we are merely evaluating, only the shipped default.
+    "paraphrase-multilingual-MiniLM-L12-v2": ModelSpec(
+        artifacts=(
+            ModelArtifact(local_name="model.onnx", remote_path="onnx/model.onnx"),
+            ModelArtifact(local_name="tokenizer.json", remote_path="tokenizer.json"),
+        ),
+        sources=(
+            ModelSource(
+                name="huggingface",
+                base_url="https://huggingface.co/Xenova/paraphrase-multilingual-MiniLM-L12-v2/resolve/main/",
+            ),
+        ),
+    ),
+    # bge-m3 fp32 stores its 2.1 GB of weights in an external data file that
+    # ONNX Runtime loads automatically when it sits beside model.onnx.
+    "bge-m3": ModelSpec(
+        artifacts=(
+            ModelArtifact(local_name="model.onnx", remote_path="onnx/model.onnx"),
+            ModelArtifact(local_name="model.onnx_data", remote_path="onnx/model.onnx_data"),
+            ModelArtifact(local_name="tokenizer.json", remote_path="tokenizer.json"),
+        ),
+        sources=(
+            ModelSource(
+                name="huggingface",
+                base_url="https://huggingface.co/Xenova/bge-m3/resolve/main/",
+            ),
+        ),
+    ),
 }
 
 

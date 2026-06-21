@@ -587,8 +587,10 @@ Phase 4 acceptance criteria:
   overlap with the query but is semantically related. **Met** on a synthetic
   general eval set (50 notes / 25 queries, EN/ZH/mixed): dense recall 0.95
   @5/@10 on paraphrase queries vs 0.00 for FTS5. See ADR 2026-06-13 Appendix A.
-  *Caveat:* the §8 bar of 50–100 *real* dogfood notes + a head-to-head against
-  MiniLM/bge-m3 is still outstanding and gates GA, not this checkpoint.
+  *Caveat:* the §8 head-to-head against MiniLM and bge-m3 is done on the
+  synthetic set (ADR Appendix A) — e5-small vs MiniLM is now an open question to
+  settle on real notes; the 50–100 *real* dogfood notes still gate GA, not this
+  checkpoint.
 - `marbles reembed` executes end to end without `--dry-run`, populating
   `embedding_model` and `embedded_at` for every note. **Met** (verified
   2026-06-21).
