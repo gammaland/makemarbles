@@ -179,10 +179,20 @@ Re-vector notes under a target embedding model.
   dry-run mode, or `{"model": ..., "processed": N, "dry_run": false}`
   after a real pass.
 
-#### `marbles search ... --semantic` `[planned]`
+#### `marbles search ... --semantic` `[shipped]`
 
-Hybrid retrieval (FTS5 + vector via RRF). Flag name and default behavior are
-not yet decided.
+Hybrid retrieval (FTS5 + vector via RRF) is the default for `marbles search`;
+the `--semantic` and `--exact` flags select a single channel. Flags, defaults,
+and degradation behavior are specified in full under §3.1 `marbles search`.
+
+Validated end to end on 2026-06-21: `marbles reembed` embeds the corpus, and on
+a 50-note / 25-query synthetic eval set the dense channel recalls 95% @5/@10 of
+paraphrase queries that share no surface tokens with their gold note, where FTS5
+recalls 0%. Hybrid does not regress on lexical-overlap queries. Numbers, method,
+and caveats: ADR 2026-06-13 Appendix A. The harness lives at
+`tools/eval_semantic.py` with its labeled set at `tools/eval/semantic_eval.json`
+(general-purpose and non-personal, safe to commit / run in CI; the real-dogfood
+eval per §8 is run privately against `~/.marbles`).
 
 ### 3.3 Sync
 
@@ -574,12 +584,17 @@ Phase 4 first, Phase 2 second. The two are independent.
 Phase 4 acceptance criteria:
 
 - `marbles search "minimal pair query"` returns a note that has no token
-  overlap with the query but is semantically related, on a dogfood eval set
-  of 50 to 100 notes with 20 paraphrase queries.
+  overlap with the query but is semantically related. **Met** on a synthetic
+  general eval set (50 notes / 25 queries, EN/ZH/mixed): dense recall 0.95
+  @5/@10 on paraphrase queries vs 0.00 for FTS5. See ADR 2026-06-13 Appendix A.
+  *Caveat:* the §8 bar of 50–100 *real* dogfood notes + a head-to-head against
+  MiniLM/bge-m3 is still outstanding and gates GA, not this checkpoint.
 - `marbles reembed` executes end to end without `--dry-run`, populating
-  `embedding_model` and `embedded_at` for every note.
+  `embedding_model` and `embedded_at` for every note. **Met** (verified
+  2026-06-21).
 - Embedding model weights download from HuggingFace with a documented
-  fallback to a GitHub Releases mirror.
+  fallback to a GitHub Releases mirror. **Met** (HF fetch exercised on the
+  first real reembed).
 
 Phase 2 acceptance criteria:
 

@@ -131,4 +131,63 @@ We will re-open this decision if any of the following becomes true:
 
 ---
 
+## Appendix A: First eval run (2026-06-21)
+
+Recorded by `tools/eval_semantic.py` against `tools/eval/semantic_eval.json`.
+
+**What this set is — and is not.** This is a **fully synthetic, general-purpose**
+eval (common topics: general computing, cooking, plants, travel, fitness, money,
+learning) containing **no personal or business content**, so it commits to the
+public repo and can run in CI. It validates the *retrieval pipeline*, not the
+user's real corpus. It is therefore **not** the §8 dogfood bar: that one (50–100
+of the user's *own* notes with hand-labeled relevance) is run privately against
+`~/.marbles` and is not committed. Treat these numbers as a pipeline smoke
+signal, not a model-quality verdict. 50 notes (EN / ZH / mixed), 25 labeled
+queries: 20 paraphrase minimal pairs built with little-to-no surface-token
+overlap with their gold note, plus 5 lexical-overlap controls. Model:
+**multilingual-e5-small**.
+
+| group | n | channel | Recall@5 | Recall@10 | MRR |
+|---|---|---|---|---|---|
+| paraphrase (no token overlap) | 20 | fts | 0.00 | 0.00 | 0.00 |
+| | | vector | 0.95 | 0.95 | 0.87 |
+| | | hybrid | 0.95 | 0.95 | 0.87 |
+| lexical (token overlap) | 5 | fts | 0.60 | 0.60 | 0.60 |
+| | | vector | 1.00 | 1.00 | 1.00 |
+| | | hybrid | 1.00 | 1.00 | 1.00 |
+| overall | 25 | fts | 0.12 | 0.12 | 0.12 |
+| | | vector | 0.96 | 0.96 | 0.90 |
+| | | hybrid | 0.96 | 0.96 | 0.90 |
+
+**Read of the result.** On the paraphrase set the lexical channel recalls
+*nothing* (0.00 by construction), while the dense channel recalls 95% at both
+rank 5 and rank 10 — including cross-lingual pairs (EN query → ZH note and a
+ZH note + EN note sharing one gold). That is the Phase 4 acceptance claim
+demonstrated: notes with no token overlap to the query are retrieved on meaning
+alone.
+
+**Hybrid == vector on this set, and that is expected.** RRF here is a safety
+net, not a booster: on paraphrase queries FTS contributes nothing to fuse, and
+on the lexical controls the dense channel already nails the gold note, so
+fusion has no headroom to add. The control group shows hybrid does not *regress*
+on easy keyword hits — it stays at 1.00 even where FTS alone only reaches 0.60.
+A set where one channel is strong and the other weak *per query* would be needed
+to show fusion lifting a result above either channel alone; that is future work.
+
+**One hybrid miss** (gold outside top 10): the EN-query → ZH-note cross-lingual
+bread-proofing pair (`n16`). Cross-lingual EN→ZH is the model's weakest axis at
+this size, consistent with §9's "good enough, not perfect" caveat. One miss in
+25 is within tolerance for a ~110 MB model.
+
+**Latency** (single-note `embed_passage`, warm, Apple Silicon arm64,
+CoreML EP available): p50 **45 ms**, p95 **68 ms** over 50 samples.
+
+**Still pending for the full §8 bar:** the private dogfood run on 50–100 real
+notes, the head-to-head against paraphrase-multilingual-MiniLM-L12-v2 and bge-m3
+(requires downloading both), and x86 latency numbers. The decision to ship
+e5-small as the default stands on this pipeline evidence; it is not yet
+GA-validated against the cheaper/heavier alternatives.
+
+---
+
 *ADR conventions: this document records the decision **and** the alternatives considered, so future readers can reconstruct why we chose what we did. If you disagree with the choice today, open an issue with the evidence; that is the intended use of this file.*
