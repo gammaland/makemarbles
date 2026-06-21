@@ -6,7 +6,9 @@ import numpy as np
 import sqlite_utils
 import sqlite_vec
 
+from core import oplog
 from core.models import Note
+from core.oplog import Op
 
 DEFAULT_DB_PATH = Path.home() / ".marbles" / "marbles.db"
 
@@ -51,6 +53,31 @@ class Storage:
                 ["content", "tag"], create_triggers=True, tokenize="porter unicode61"
             )
         self._migrate_embedding_columns()
+        self._init_oplog()
+
+    def _init_oplog(self) -> None:
+        """Create the local op log (SPEC §7.1).
+
+        Append-only change-data-capture for sync. `local_seq` is an
+        INTEGER PRIMARY KEY so SQLite auto-assigns a monotonic rowid; we never
+        delete ops, so it never reuses a value. `server_op_id` stays NULL until
+        the server accepts the op. The table is maintained from the first note
+        ever captured, even on the free tier — emitting is cheap and free of any
+        crypto/network dependency, which removes the need to backfill ops when a
+        user later turns on sync.
+        """
+        if "ops" not in self.db.table_names():
+            self.db["ops"].create(
+                {
+                    "local_seq": int,
+                    "op_type": str,
+                    "note_id": str,
+                    "client_ts": str,
+                    "payload": str,
+                    "server_op_id": int,
+                },
+                pk="local_seq",
+            )
 
     def _migrate_embedding_columns(self) -> None:
         """Idempotently add columns the v0.2 semantic-search path needs.
@@ -68,14 +95,23 @@ class Storage:
     # ---------- notes CRUD ----------
 
     def add(self, note: Note) -> str:
-        self.db["notes"].insert(
-            {
-                "id": note.id,
-                "content": note.content,
-                "tag": note.tag,
-                "created_at": note.created_at.isoformat(),
-            }
-        )
+        """Insert a note and emit its INSERT op atomically (SPEC §7.1).
+
+        Both writes go through raw `conn.execute` inside one transaction.
+        sqlite-utils' own `.insert()` commits internally, so it cannot share a
+        transaction with the op write; raw inserts still fire the FTS triggers.
+        client_ts is the note's creation moment — for a fresh insert that IS
+        the moment the op was produced.
+        """
+        created = note.created_at.isoformat()
+        with self.db.conn:
+            self.db.conn.execute(
+                "INSERT INTO notes(id, content, tag, created_at) VALUES(?, ?, ?, ?)",
+                [note.id, note.content, note.tag, created],
+            )
+            self._append_op(
+                "insert", note.id, created, oplog.insert_payload(note)
+            )
         return note.id
 
     def get(self, note_id: str) -> Note | None:
@@ -109,16 +145,78 @@ class Storage:
         return [self._to_note(r) for r in rows]
 
     def delete(self, note_id: str) -> bool:
-        try:
-            self.db["notes"].delete(note_id)
-        except sqlite_utils.db.NotFoundError:
+        """Delete a note and emit its DELETE op atomically (SPEC §7.1).
+
+        Returns False (and emits nothing) when the note does not exist. The op
+        outlives the note row by design: the log is append-only and a peer
+        replaying the delete needs the record even though the note is gone.
+        """
+        if self.get(note_id) is None:
             return False
-        # Vec row stays orphaned if it exists; vector_search ignores rows
-        # whose note_id no longer joins, so this is harmless. We still drop
-        # it eagerly to keep the index size bounded.
-        if "notes_vec" in self.db.table_names():
-            self.db.conn.execute("DELETE FROM notes_vec WHERE note_id = ?", [note_id])
+        has_vec = "notes_vec" in self.db.table_names()
+        client_ts = datetime.now(timezone.utc).isoformat()
+        with self.db.conn:
+            self.db.conn.execute("DELETE FROM notes WHERE id = ?", [note_id])
+            # Vec row is local-derived state; drop it eagerly to keep the index
+            # bounded. It is not part of the synced op (SPEC §7.6).
+            if has_vec:
+                self.db.conn.execute(
+                    "DELETE FROM notes_vec WHERE note_id = ?", [note_id]
+                )
+            self._append_op(
+                "delete", note_id, client_ts, oplog.delete_payload(note_id)
+            )
         return True
+
+    # ---------- op log (SPEC §7.1) ----------
+
+    def _append_op(
+        self, op_type: str, note_id: str, client_ts: str, payload: dict
+    ) -> None:
+        """Append one op. Must run inside an open transaction so the op commits
+        atomically with the mutation that produced it."""
+        self.db.conn.execute(
+            "INSERT INTO ops(op_type, note_id, client_ts, payload, server_op_id) "
+            "VALUES(?, ?, ?, ?, NULL)",
+            [op_type, note_id, client_ts, oplog.encode_payload(payload)],
+        )
+
+    def ops_count(self) -> int:
+        return self.db["ops"].count
+
+    def unsynced_ops(self, limit: int | None = None) -> list[Op]:
+        """Ops the server has not yet accepted, oldest first.
+
+        This is the push backlog: `server_op_id IS NULL` in local emission
+        order. The push path (next slice) encrypts and signs each in turn,
+        then calls mark_op_synced with the server-assigned op_id.
+        """
+        sql = (
+            "SELECT local_seq, op_type, note_id, client_ts, payload, server_op_id "
+            "FROM ops WHERE server_op_id IS NULL ORDER BY local_seq"
+        )
+        if limit is not None:
+            sql += f" LIMIT {int(limit)}"
+        return [self._to_op(r) for r in self.db.query(sql)]
+
+    def mark_op_synced(self, local_seq: int, server_op_id: int) -> None:
+        """Record the server-assigned op_id, removing the op from the backlog."""
+        with self.db.conn:
+            self.db.conn.execute(
+                "UPDATE ops SET server_op_id = ? WHERE local_seq = ?",
+                [server_op_id, local_seq],
+            )
+
+    @staticmethod
+    def _to_op(row: dict) -> Op:
+        return Op(
+            local_seq=row["local_seq"],
+            op_type=row["op_type"],
+            note_id=row["note_id"],
+            client_ts=row["client_ts"],
+            payload=oplog.decode_payload(row["payload"]),
+            server_op_id=row["server_op_id"],
+        )
 
     # ---------- embedding bookkeeping ----------
 

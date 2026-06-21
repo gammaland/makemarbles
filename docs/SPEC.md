@@ -362,13 +362,13 @@ write; the writer never tries to be clever about model versioning.
 
 ---
 
-## 7. Sync subsystem `[crypto primitives shipped; rest designed]`
+## 7. Sync subsystem `[crypto primitives + local op log shipped; rest designed]`
 
 Phase 2. Builds on Cloudflare Durable Objects as the server runtime. The
 client is local-first: the SQLite file is the source of truth, the server is
 an encrypted relay.
 
-Implementation status as of 2026-06-19:
+Implementation status as of 2026-06-21:
 
 - `core/crypto.py` ships the cryptographic primitives the rest of §7 will
   rely on: PBKDF2-SHA256 auth credential derivation (600k iterations),
@@ -377,10 +377,14 @@ Implementation status as of 2026-06-19:
   per-device signing/verification. 25 tests cover round-trip behavior and
   tamper detection on every input axis (key, nonce, ciphertext, AAD,
   message, signature, public key).
-- The op log table, the wire protocol implementation, the CLI commands,
-  and the Cloudflare Durable Objects server are still designed only.
+- `core/oplog.py` + the `ops` table ship the local op log (§7.1). Every note
+  insert/delete atomically appends one op; payloads are stored in plaintext
+  locally and have no crypto/network dependency. See §7.1.
+- The wire protocol implementation, the CLI commands (`login`, `sync`,
+  `devices`), and the Cloudflare Durable Objects server are still designed
+  only.
 
-### 7.1 Op model `[designed]`
+### 7.1 Op model `[local log shipped; server replay designed]`
 
 Each local mutation produces exactly one op. INSERT and UPDATE carry the
 complete resulting row (Section 2.4); DELETE carries the target id and the
@@ -390,6 +394,25 @@ The op log is append-only at every layer: client emits, server stores, peers
 replay. The server never modifies an op after writing it. Compaction is not
 defined in v0.2; the log grows linearly with edits, which at personal scale
 is acceptable for years.
+
+**Shipped (client side).** `core/storage.py` maintains an `ops` table from the
+first note captured, even on the free tier — emission is a single extra row
+insert with no crypto or network dependency, which removes any need to backfill
+ops when a user later turns on sync. `add` and `delete` each write the note
+mutation and its op inside one transaction (raw `conn.execute`, since
+sqlite-utils' own `.insert()` commits internally and cannot share the
+transaction), so a note never persists without its op. Embedding writes
+(`upsert_vector`) emit no op: vectors are local-derived, recomputable, and
+non-synced (§7.6). Two columns track lifecycle: `local_seq` (the append order
+on this device) and `server_op_id` (NULL until the server accepts the op;
+`unsynced_ops()` reads `server_op_id IS NULL` to find the push backlog).
+Payloads are JSON, deterministically encoded (`sort_keys`) so a future
+signature over the blob is stable. Stored in plaintext locally — the same data
+already lives in `notes` on the same disk; encryption happens only at push
+(§7.4).
+
+**Designed (server side).** `op_id` assignment, cross-device replay, and the
+last-write-wins merge on pull (§7.2) land with the wire protocol and server.
 
 ### 7.2 Ordering and conflict resolution `[designed]`
 

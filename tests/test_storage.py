@@ -279,3 +279,99 @@ def test_reset_then_recreate_with_different_dim(storage: Storage):
     # After reset, a fresh upsert may use any dim.
     storage.upsert_vector(a, _unit_vec([1.0, 0.0, 0.0, 0.0, 0.0]), "big-model")
     assert storage.vec_table_dim() == 5
+
+
+# ---------- op log (SPEC §7.1) ----------
+
+
+def test_add_emits_one_insert_op(storage: Storage):
+    note = Note(content="capture this", tag="work")
+    storage.add(note)
+    ops = storage.unsynced_ops()
+    assert len(ops) == 1
+    op = ops[0]
+    assert op.op_type == "insert"
+    assert op.note_id == note.id
+    assert op.server_op_id is None
+    # client_ts equals the creation moment for a fresh insert.
+    assert op.client_ts == note.created_at.isoformat()
+    # Payload is the full row, minus local-derived embedding fields.
+    assert op.payload == {
+        "id": note.id,
+        "content": "capture this",
+        "tag": "work",
+        "created_at": note.created_at.isoformat(),
+    }
+
+
+def test_delete_emits_a_delete_op_that_outlives_the_note(storage: Storage):
+    note_id = storage.add(Note(content="ephemeral"))
+    storage.delete(note_id)
+    assert storage.get(note_id) is None  # note row gone
+    ops = storage.unsynced_ops()
+    assert [o.op_type for o in ops] == ["insert", "delete"]
+    delete_op = ops[-1]
+    assert delete_op.note_id == note_id
+    assert delete_op.payload == {"id": note_id}
+
+
+def test_delete_missing_note_emits_no_op(storage: Storage):
+    assert storage.delete("01nonexistent") is False
+    assert storage.ops_count() == 0
+
+
+def test_local_seq_is_monotonic_in_emission_order(storage: Storage):
+    a = storage.add(Note(content="first"))
+    b = storage.add(Note(content="second"))
+    ops = storage.unsynced_ops()
+    assert [o.note_id for o in ops] == [a, b]
+    assert ops[0].local_seq < ops[1].local_seq
+
+
+def test_upsert_vector_emits_no_op(storage: Storage):
+    # Embeddings are local-derived, non-synced state (SPEC §7.6); they must
+    # not generate ops or every reembed would flood the sync log.
+    note_id = storage.add(Note(content="x"))
+    storage.upsert_vector(note_id, _unit_vec([1.0, 0.0, 0.0]), "m")
+    assert storage.ops_count() == 1  # the insert only
+
+
+def test_mark_op_synced_clears_it_from_the_backlog(storage: Storage):
+    storage.add(Note(content="a"))
+    storage.add(Note(content="b"))
+    backlog = storage.unsynced_ops()
+    assert len(backlog) == 2
+
+    storage.mark_op_synced(backlog[0].local_seq, server_op_id=1001)
+    remaining = storage.unsynced_ops()
+    assert [o.local_seq for o in remaining] == [backlog[1].local_seq]
+    assert storage.ops_count() == 2  # still in the log, just acknowledged
+
+
+def test_unsynced_ops_respects_limit(storage: Storage):
+    for i in range(5):
+        storage.add(Note(content=f"n{i}"))
+    assert len(storage.unsynced_ops(limit=2)) == 2
+
+
+def test_add_is_atomic_note_and_op_roll_back_together(storage: Storage, monkeypatch):
+    # If op emission fails mid-add, the note insert must roll back too, so we
+    # never persist a note without its op. Force encode_payload to blow up.
+    from core import oplog
+
+    monkeypatch.setattr(
+        oplog, "encode_payload", lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("boom"))
+    )
+    note = Note(content="should not survive")
+    with pytest.raises(RuntimeError):
+        storage.add(note)
+    assert storage.get(note.id) is None
+    assert storage.ops_count() == 0
+
+
+def test_ops_survive_reopen(storage: Storage, tmp_path):
+    storage.add(Note(content="durable"))
+    # Reopen the same db file: ops table and rows persist.
+    reopened = Storage(db_path=storage.db_path)
+    assert reopened.ops_count() == 1
+    assert reopened.unsynced_ops()[0].op_type == "insert"
