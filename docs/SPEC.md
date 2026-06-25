@@ -421,7 +421,7 @@ Implementation status as of 2026-06-24:
   registry. A cross-language golden vector (envelope signed by the Python
   client) is verified by the worker in CI, guarding wire compatibility.
 - Still **not built**: the `login` handshake that produces the `Identity`
-  bundle, JWT edge auth + the `is_pro` entitlement gate, the live WebSocket
+  bundle, device-signature request auth + the `is_pro` entitlement gate, the live WebSocket
   fan-out, the `sync` / `devices` CLI commands, and pull/replay back into the
   local tables.
 
@@ -672,31 +672,65 @@ The DO stores the op exactly as relayed plus the two server-assigned fields
 (`op_id`, `server_ts`). `blob` and `signature` are opaque base64. There is no
 content, note_id, or op type anywhere in server storage (§7.6).
 
-### 7.11 API surface `[designed]`
+### 7.11 Authentication and API surface `[designed]`
 
-All requests are HTTPS (TLS via Workers). After login, push/pull/connect carry
-a **session token** — a signed JWT scoped to `(account_id, device_id, exp)`,
-validated at the Worker edge before the request is routed to the account DO.
+All requests are HTTPS (TLS via Workers). **There is no session token.** Two
+credentials carry all authentication, each for a distinct moment:
+
+- **The master password** (as `auth_credential`) authenticates exactly two
+  events: account registration and **device enrollment**. It proves account
+  ownership when a new device's public key is added.
+- **The device Ed25519 key** authenticates everything ongoing. After a device
+  is enrolled, every read/write request it makes is signed by that key and
+  verified by the server against the registered public key. No tokens to issue,
+  store, expire, or refresh; and because the server re-checks the device's
+  `revoked` flag on every request, **revocation is instant** (a property a JWT
+  would not give without a denylist).
+
+**Device request signature.** A signed request carries four headers and an
+Ed25519 signature over a canonical string:
+
+```
+canonical = utf8(account_id) || utf8(device_id) || utf8(method)
+            || utf8(path_with_query) || utf8(timestamp)
+
+headers: X-MM-Account, X-MM-Device, X-MM-Timestamp, X-MM-Signature(base64)
+```
+
+The server reconstructs `canonical`, rejects a `timestamp` outside ±300 s
+(matching the op skew window, §7.2), verifies the signature against the
+registered, non-revoked device key, then routes to the account DO. Read requests
+(`GET /ops`) are idempotent, so replay inside the window is harmless; the one
+state-changing signed request (`revoke`) is idempotent too — so no server-side
+nonce table is needed in v0.2.
+
+`POST /push` is a special case: it is **self-authenticating**. The op envelope
+already carries an Ed25519 signature over `device_id || client_ts || blob`
+(§7.5) and binds the account via the GCM AAD (§7.4), so it needs no extra
+request signature.
 
 | Method + path | Auth | Purpose |
 | --- | --- | --- |
 | `POST /account` | none | Create account for an email; server generates and returns `{ account_id, salt }`. |
 | `PUT /account/auth` | none (proves possession via the credential itself) | Set `auth_hash` from the client-derived `auth_credential`. Completes registration. |
-| `GET /account/salt?email=` | none | Return the per-account `salt` so the client can derive `auth_credential` and `K` at login. |
-| `POST /login` | none | `{ email, auth_credential }`; server checks against `auth_hash`, returns `{ account_id, session_token }`. |
-| `POST /devices` | session | Register this device's Ed25519 public key; returns the generated `device_id`. Idempotent per device on re-login. |
-| `GET /devices` | session | List active (non-revoked) devices. |
-| `POST /devices/{id}/revoke` | session | Mark a device revoked; the DO rejects its future ops (§7.3). |
-| `POST /push` | session | Submit one push envelope (§7.5); returns `{ op_id }`. This is the concrete `Transport.push`. |
-| `GET /ops?after={op_id}` | session | Return ops with `op_id > after`, in order, each in the pull wire format (§7.5). `after=0` bootstraps. |
-| `GET /connect` (WebSocket) | session | Open a receive-only live stream; the DO pushes each newly accepted op (pull format) to the account's other sockets. Uses the DO WebSocket Hibernation API. |
+| `GET /account/salt?email=` | none | Return the per-account `salt` so the client can derive `auth_credential` and `K`. |
+| `POST /devices` | **auth_credential** | Enroll this device's Ed25519 public key; `{ email, auth_credential, pubkey }`, server checks against `auth_hash`, returns the generated `device_id`. The one password-gated routine call. |
+| `GET /devices` | device signature | List active (non-revoked) devices. |
+| `POST /devices/{id}/revoke` | device signature | Mark a device revoked; the DO rejects its future ops and signed requests (§7.3). |
+| `POST /push` | op signature (self-auth) | Submit one push envelope (§7.5); returns `{ op_id }`. This is the concrete `Transport.push`. |
+| `GET /ops?after={op_id}` | device signature | Return ops with `op_id > after`, in order, each in the pull wire format (§7.5). `after=0` bootstraps. |
+| `GET /connect` (WebSocket) | device signature (on upgrade) | Open a receive-only live stream; the DO pushes each newly accepted op (pull format) to the account's other sockets. Uses the DO WebSocket Hibernation API. |
 
-**Login handshake.** Salts are server-owned (§7.3). The client fetches the salt
-(`GET /account/salt`), derives `auth_credential = PBKDF2(pw, salt)` and the
-encryption key `K = Argon2id(pw, salt)` locally, then `POST /login` with only
-the `auth_credential`. `K` never leaves the device. On first login on a new
-device, the client generates an Ed25519 keypair and registers the public key via
-`POST /devices`.
+**There is no `POST /login` and no session.** "Logging in" is just: fetch the
+salt (`GET /account/salt`), derive `auth_credential = PBKDF2(pw, salt)` and the
+encryption key `K = Argon2id(pw, salt)` locally (§7.3), and — if this device is
+not yet enrolled — generate an Ed25519 keypair and call `POST /devices` with the
+`auth_credential` to register its public key. `K` never leaves the device. From
+then on the device key alone authenticates push, pull, and connect.
+
+**Email verification** is not performed in v0.2: `email` is only the salt-lookup
+key and account identifier. A verification step is a possible later hardening,
+not a v0.2 requirement.
 
 **`marbles sync` loop.** Without `--once`, the command opens the `GET /connect`
 WebSocket and, in the same foreground process, drains the local push backlog via
@@ -709,11 +743,11 @@ background daemon; the socket is open only while the command runs.
 
 On `POST /push` the account DO, serially:
 
-1. Validates the session token and that `device_id` is registered and **not
-   revoked**; else `403`.
+1. Confirms `device_id` is registered and **not revoked**; else `403`.
 2. **Verifies the Ed25519 signature** over `device_id || client_ts || blob`
-   against the stored device public key (§7.5); else `403`. The server refuses
-   to store an op no registered device signed.
+   against the stored device public key (§7.5); else `403`. This op signature is
+   what authenticates the push — there is no separate session token (§7.11). The
+   server refuses to store an op no registered device signed.
 3. **Skew check:** rejects `client_ts` more than 300 s ahead of server time
    (§7.2) with `409`; late ops are accepted without fuss.
 4. Assigns `op_id = next_op_id++` and stamps `server_ts`.
