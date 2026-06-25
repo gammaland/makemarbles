@@ -2,7 +2,7 @@
 
 > Local-first AI journal with dual-channel I/O: human via CLI, LLM agents via MCP.
 
-**Status**: `v0.1.0-alpha` · Python 3.12+ · AGPL-3.0-or-later
+**Status**: `v0.1.0` · Python 3.12+ · AGPL-3.0-or-later
 
 ---
 
@@ -209,7 +209,7 @@ After restart, the agent can ask "remember that I decided to use FastMCP" → `a
 
 ---
 
-## What's shipped (v0.1.0-alpha)
+## What's shipped (v0.1.0)
 
 - **CLI**: `log`, `recent`, `search`, `count`, `rm`, `shell`
 - **Input**: positional arg, stdin pipe, `--editor` for multi-line composition

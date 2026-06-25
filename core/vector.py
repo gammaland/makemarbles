@@ -5,9 +5,7 @@ vectors. The public API exposes embed_passage / embed_query rather than a
 single embed(text, role) so that E5's instruction-prefix discipline is visible
 at every call site.
 
-See:
-- docs/adr/2026-06-13-embedding-model.md   — why multilingual-e5-small
-- docs/private/embedding-stack.md          — runtime stack and tokenizer details
+See docs/adr/2026-06-13-embedding-model.md for why multilingual-e5-small.
 """
 
 from __future__ import annotations

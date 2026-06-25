@@ -4,8 +4,7 @@ Strategy: mock out the ONNX session and the tokenizer so logic can be tested
 without downloading a real ~470 MB model. Verifies prefix discipline, pooling
 math, attention-mask handling, normalization, and token_type_ids feed gating.
 
-End-to-end tests against the real model live in tests/integration/ (deferred;
-see docs/private/embedding-stack.md §6 open questions).
+End-to-end tests against the real model live in tests/integration/ (deferred).
 """
 
 from __future__ import annotations

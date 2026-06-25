@@ -30,7 +30,7 @@ makemarbles/
 ## Key commands
 
 ```bash
-# Shipped (v0.1.0-alpha)
+# Shipped (v0.1.0)
 marbles log "content" [-t tag] [-e]   # capture; -e opens $EDITOR
 marbles recent [--days N]             # browse
 marbles search "query"                # FTS5 keyword search
