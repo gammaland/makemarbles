@@ -1,0 +1,20 @@
+{
+  "name": "makemarbles-sync",
+  "version": "0.2.0-dev",
+  "private": true,
+  "type": "module",
+  "description": "MakeMarbles zero-knowledge sync server (Cloudflare Workers + Durable Objects). SPEC §7.9-7.13.",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.5.2",
+    "@cloudflare/workers-types": "^4.20241106.0",
+    "typescript": "^5.6.3",
+    "vitest": "~2.1.9",
+    "wrangler": "^3.99.0"
+  }
+}

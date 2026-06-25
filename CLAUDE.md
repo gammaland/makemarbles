@@ -25,7 +25,7 @@ makemarbles/
 └── pyproject.toml
 ```
 
-`worker/` (Cloudflare Durable Objects sync server) does not exist yet; it lands with Phase 2.
+`worker/` (Cloudflare Durable Objects sync server) is in early Phase 2: the per-account `AccountDO` with push / pull / device registry is implemented and tested; login handshake, entitlement gate, and live WebSocket fan-out are not built yet. See `worker/README.md`.
 
 ## Key commands
 

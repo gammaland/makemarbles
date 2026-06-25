@@ -1,0 +1,9 @@
+{
+  "_README": "Cross-language golden vector. Signed by the shipped Python client (core/crypto.py + core/wire._signing_input) with a fixed device seed = bytes(range(32)). The worker MUST verify this, proving its signing-input construction is byte-compatible with the client. Regenerate via the snippet in test/push-pull.test.ts header if the signing input ever changes.",
+  "account_id": "acc_golden",
+  "device_id": "dev_01HXGOLDEN",
+  "client_ts": "2026-06-24T12:00:00Z",
+  "device_pubkey_b64": "A6EHv/POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg=",
+  "blob_b64": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7",
+  "signature_b64": "tn7IELvy/eRE3wPRqjkwK6tjKXRxdsbKOFfDSjCzIbThhocxP2QyN9pRlHVEJrjSqFCl6ZbYzI5GH7WJHIBXAQ=="
+}
