@@ -199,19 +199,22 @@ eval per §8 is run privately against `~/.marbles`).
 
 ### 3.3 Sync
 
-The following commands are designed but not yet implemented. They will fail
-with a clear "not yet available" message until v0.2 lands. See Section 7.
+`marbles login` / `logout` are implemented; `sync` and `devices` are designed
+and will arrive in later slices. See Section 7.
 
-#### `marbles login` `[designed]`
+#### `marbles login` `[shipped]`
 
 Prompt for email and master password. Derive the auth credential (PBKDF2-SHA256,
-600k iterations) and the encryption key (Argon2id, 64 MiB, t=3). The auth
-credential is sent to the server for verification. The encryption key never
-leaves the device.
+600k iterations) locally; the encryption key (Argon2id, 64 MiB, t=3) is derived
+only when a sync needs it, and never leaves the device. The auth credential is
+sent to the server to gate device enrollment.
 
-On first login, a new Ed25519 device keypair is generated. The public key is
-registered with the server; the private key is stored locally and used to sign
-every outbound op.
+On first login a new Ed25519 device keypair is generated; its public key is
+enrolled with the server (`POST /devices`, password-gated, §7.11) and the
+private seed is stored locally (`~/.marbles/identity.json`, 0600) to sign every
+outbound op. If no account exists for the email, the command offers to register
+one (and warns that the password is unrecoverable). Re-login on the same device
+reuses its existing keypair.
 
 #### `marbles sync [--once]` `[designed]`
 
@@ -231,10 +234,10 @@ A revoked device can no longer push new ops. Notes already decrypted on that
 device remain decrypted locally; revocation does not reach into a device the
 account no longer trusts.
 
-#### `marbles logout` `[designed]`
+#### `marbles logout` `[shipped]`
 
-Clear local credentials and the device keypair. The local SQLite remains
-intact and usable in offline mode.
+Clear local credentials and the device keypair (delete `identity.json`). The
+local SQLite remains intact and usable in offline mode.
 
 ### 3.4 Removed or excluded
 
@@ -423,10 +426,14 @@ Implementation status as of 2026-06-24:
   `POST /devices` enrollment (scheme B, §7.11). A cross-language golden vector
   (envelope signed by the Python client) is verified by the worker in CI; 12
   vitest tests run in the real workerd runtime.
+- The **client `login` / `logout`** are shipped: `core/remote.py` (HTTP client),
+  `core/identity.py` (device identity persistence + the enroll flow), and the
+  CLI commands. Verified end to end against a live `wrangler dev` worker:
+  register → enroll → push (sealed + signed) → pull → verify → decrypt round-trips
+  the original note content across the Python/TypeScript boundary.
 - Still **not built**: the device-request-signature check on pull/revoke, the
-  `is_pro` entitlement gate, the live WebSocket fan-out, the client-side `login`
-  handshake that produces the `Identity` bundle, the `sync` / `devices` CLI
-  commands, and pull/replay back into the local tables.
+  `is_pro` entitlement gate, the live WebSocket fan-out, the `sync` / `devices`
+  CLI commands, and pull/replay back into the local tables.
 
 ### 7.1 Op model `[local log shipped; server replay designed]`
 

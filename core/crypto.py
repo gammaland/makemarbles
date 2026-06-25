@@ -194,6 +194,22 @@ def load_public_key(public: bytes) -> ed25519.Ed25519PublicKey:
     return ed25519.Ed25519PublicKey.from_public_bytes(public)
 
 
+def public_key_from_seed(seed: bytes) -> bytes:
+    """Derive the 32-byte Ed25519 public key from a stored private seed.
+
+    Used when re-logging in on a known device: we keep the seed on disk but
+    re-derive the public key to register rather than persisting both.
+    """
+    return (
+        load_private_key(seed)
+        .public_key()
+        .public_bytes(
+            encoding=serialization.Encoding.Raw,
+            format=serialization.PublicFormat.Raw,
+        )
+    )
+
+
 def sign(private_seed: bytes, message: bytes) -> bytes:
     """Produce an Ed25519 signature over `message`. Returns 64 bytes."""
     return load_private_key(private_seed).sign(message)

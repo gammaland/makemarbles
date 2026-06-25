@@ -25,7 +25,7 @@ makemarbles/
 └── pyproject.toml
 ```
 
-`worker/` (Cloudflare Durable Objects sync server) is in early Phase 2: the per-account `AccountDO` with push / pull / device registry is implemented and tested; login handshake, entitlement gate, and live WebSocket fan-out are not built yet. See `worker/README.md`.
+`worker/` (Cloudflare Durable Objects sync server) is in Phase 2: per-account `AccountDO` (push/pull/device registry), the D1 account registry, and password-gated device enrollment are implemented and tested; client `marbles login`/`logout` work and the full register→enroll→push→pull→decrypt loop is verified end to end against `wrangler dev`. Not built yet: device-signed pull, `is_pro` gate, live WebSocket, `sync`/`devices` CLI, pull replay. See `worker/README.md`.
 
 ## Key commands
 
@@ -41,10 +41,10 @@ marbles shell                         # interactive REPL
 # Scaffolded for v0.2 (not fully wired)
 marbles reembed [--model NAME] [--dry-run]   # --dry-run works; full path refuses cleanly
 
-# Designed for v0.2 (not built)
-marbles login | logout
-marbles sync [--once] | sync status
-marbles devices list | revoke <device-id>
+# Sync, Phase 2 (login/logout shipped; rest designed)
+marbles login | logout                        # register/enroll device; verified e2e
+marbles sync [--once] | sync status           # designed, not built
+marbles devices list | revoke <device-id>     # designed, not built
 ```
 
 All output commands support `--json` for scripting and agent use.
