@@ -11,18 +11,25 @@ Authoritative design: [`../docs/SPEC.md`](../docs/SPEC.md) §7.9–§7.13 and
 
 ## Status
 
-First slice. Implemented:
+Implemented:
 
 - `AccountDO` (one Durable Object per account): the gapless `op_id` counter, the
-  op store, and a minimal device registry.
+  op store, and the device registry.
+- **Account lifecycle (D1 registry):** `POST /account`, `PUT /account/auth`,
+  `GET /account/salt` — register, set `auth_hash`, fetch the per-account salt.
+- **Device enrollment (password-gated):** `POST /devices` verifies the presented
+  `auth_credential` against the stored hash, then stores the client-generated
+  device public key. This is the only routine moment the password is used
+  (scheme B, SPEC §7.11).
 - `POST /push` — verify device + Ed25519 signature, clock-skew check (±300 s),
   assign `op_id`, store. Returns `{ op_id }` (the client's `Transport.push`).
 - `GET /ops?after=N` — return ops with `op_id > N` in order (pull wire format).
-- `POST /devices`, `POST /devices/revoke` — minimal registry for push verification.
+- `POST /devices/revoke` — revoke a device; its future ops are rejected.
 
-Not yet built: the login handshake + JWT edge auth (SPEC §7.11), the `is_pro`
-entitlement gate (§7.13), and the live receive-only WebSocket fan-out (§7.9).
-Until login lands, endpoints take `account_id` from the request.
+Not yet built: the **device-request-signature** check on pull / revoke (those
+still take `account_id` from the request), the `is_pro` entitlement gate
+(§7.13), the live receive-only WebSocket fan-out (§7.9), and the client-side
+`marbles login` / `devices` commands.
 
 ## Signature compatibility
 

@@ -415,15 +415,18 @@ Implementation status as of 2026-06-24:
   surface, op_id assignment, entitlement) and ADR 2026-06-24. Decisions:
   one Durable Object per account, HTTP push/catch-up + receive-only WebSocket,
   an `is_pro` entitlement flag with Stripe deferred.
-- The `worker/` package now ships its **first slice**: the per-account
-  `AccountDO` with `POST /push` (device + Ed25519 verify, ±300 s skew check,
-  gapless `op_id` assignment, store), `GET /ops?after=`, and a minimal device
-  registry. A cross-language golden vector (envelope signed by the Python
-  client) is verified by the worker in CI, guarding wire compatibility.
-- Still **not built**: the `login` handshake that produces the `Identity`
-  bundle, device-signature request auth + the `is_pro` entitlement gate, the live WebSocket
-  fan-out, the `sync` / `devices` CLI commands, and pull/replay back into the
-  local tables.
+- The `worker/` package ships the server side of registration, login, and the
+  op relay: the per-account `AccountDO` (`POST /push` with device + Ed25519
+  verify, ±300 s skew check, gapless `op_id`, store; `GET /ops?after=`; device
+  registry + revoke), the D1 account registry (`POST /account`,
+  `PUT /account/auth`, `GET /account/salt`), and the password-gated
+  `POST /devices` enrollment (scheme B, §7.11). A cross-language golden vector
+  (envelope signed by the Python client) is verified by the worker in CI; 12
+  vitest tests run in the real workerd runtime.
+- Still **not built**: the device-request-signature check on pull/revoke, the
+  `is_pro` entitlement gate, the live WebSocket fan-out, the client-side `login`
+  handshake that produces the `Identity` bundle, the `sync` / `devices` CLI
+  commands, and pull/replay back into the local tables.
 
 ### 7.1 Op model `[local log shipped; server replay designed]`
 

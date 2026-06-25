@@ -8,7 +8,12 @@ compatibility_flags = ["nodejs_compat"]
 name = "ACCOUNT_DO"
 class_name = "AccountDO"
 
-# SQLite-backed DO storage (the current default backend).
 [[migrations]]
 tag = "v1"
-new_sqlite_classes = ["AccountDO"]
+new_classes = ["AccountDO"]
+
+# Global account registry (SPEC §7.10). Real database_id is set at deploy.
+[[d1_databases]]
+binding = "DB"
+database_name = "makemarbles-accounts"
+database_id = "00000000-0000-0000-0000-000000000000"
