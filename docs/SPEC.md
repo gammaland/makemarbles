@@ -300,9 +300,8 @@ before then.
 
 See [`docs/adr/2026-06-13-embedding-model.md`](./adr/2026-06-13-embedding-model.md)
 for the model selection (default: `multilingual-e5-small`, MIT, 384-dim, ONNX,
-weights mirrored in our GitHub Releases). See the private engineering
-reference at `docs/private/embedding-stack.md` for the runtime layout
-(ONNX Runtime, `tokenizers`, E5 prefix discipline, weight export pipeline).
+weights mirrored in our GitHub Releases). The runtime layout is ONNX Runtime
+plus `tokenizers`, with E5 prefix discipline applied at every call site.
 
 ### 6.1 Current state
 
@@ -350,9 +349,8 @@ reference at `docs/private/embedding-stack.md` for the runtime layout
   notes (date-stratified over 8 months, Chinese-dominant) and 25 hand-authored
   queries (21 paraphrase / 4 lexical), e5-small scores vector recall@5 0.96,
   recall@10 1.00, MRR 0.92; FTS5 keyword scores 0.00 across the board. The
-  synthetic-set result (§3.2) now holds on real personal data. Harness gained a
-  `--data` flag; the private set lives off-repo under `docs/private/dogfood/`.
-  `[shipped]`
+  synthetic-set result (§3.2) now holds on real personal data. The harness
+  gained a `--data` flag so the private set can be run off-repo. `[shipped]`
 - **e5-small vs MiniLM head-to-head on real notes (2026-06-24): keep e5-small.**
   On the same dogfood set, `paraphrase-multilingual-MiniLM-L12-v2` scored vector
   recall@5 1.00 / MRR 0.903 vs e5-small's 0.96 / 0.919. MiniLM caught the one
@@ -412,8 +410,7 @@ Implementation status as of 2026-06-21:
   signed (Ed25519) envelope; `unpack_and_verify` is the verify-then-decrypt
   inverse a pulling peer runs; `push_backlog` drains `unsynced_ops()` over a
   `Transport` and records each server-assigned op_id. All testable with no
-  server (a fake transport verifies + decrypts like a peer). See `docs/private/
-  sync-crypto.md` for the full mechanism / security argument / comparison.
+  server (a fake transport verifies + decrypts like a peer).
 - Still designed only: the real transport (Cloudflare Durable Objects server),
   the `login` handshake that produces the `Identity` bundle, the `sync` /
   `devices` CLI commands, and pull/replay back into the local tables.
@@ -515,7 +512,7 @@ code mechanism is planned for v0.3 once dogfood feedback shows it is needed.
 Every op payload is AES-256-GCM-encrypted with the master encryption key K.
 The plaintext sealed is `{"type": <op_type>, "payload": <op payload>}`, so the
 op type and note_id ride inside the ciphertext and are invisible to the server
-(§7.6). See `docs/private/sync-crypto.md` for the end-to-end walkthrough.
+(§7.6).
 
 - **Nonce**: 96 bits, freshly random per op. At 10 thousand ops per day the
   expected time until a nonce collision under random sampling exceeds the age

@@ -81,7 +81,7 @@ Locked per-component licensing, strategy-driven rather than blanket-MIT:
 
 1. **Persistent memory for every AI tool**: MCP makes Claude Desktop, Cursor, Cline, Continue all share the same local knowledge base. Solves the "all AI tools are goldfish" pain.
 2. **Zero-structure capture**: no folders, no tags; vectors auto-organize. Eliminates the Obsidian gardening tax.
-3. **AI-native skills loop**: `/grow`, `/career-prep`, future skills consume marbles for personal workflows.
+3. **AI-native skills loop**: `/daily-review`, `/weekly-digest`, future skills consume marbles for personal workflows.
 4. **Developer-grade ingest**: CLI scriptable, iOS Shortcut, future browser/email; symmetric to AI access.
 5. **Local-first privacy**: vectors never leave device, no vendor lock-in, no cloud memory leaking across users.
 

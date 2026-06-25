@@ -1,6 +1,6 @@
 [project]
 name = "makemarbles"
-version = "0.1.0a0"
+version = "0.1.0"
 description = "Local-first AI journal with dual-channel I/O (human CLI + LLM-callable MCP)"
 authors = [{ name = "Gamma Land", email = "gammaland3d@gmail.com" }]
 readme = "README.md"
