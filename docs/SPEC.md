@@ -387,13 +387,13 @@ write; the writer never tries to be clever about model versioning.
 
 ---
 
-## 7. Sync subsystem `[crypto primitives + local op log shipped; rest designed]`
+## 7. Sync subsystem `[client crypto + push pipeline shipped; server fully designed (§7.9–§7.13), not built]`
 
 Phase 2. Builds on Cloudflare Durable Objects as the server runtime. The
 client is local-first: the SQLite file is the source of truth, the server is
 an encrypted relay.
 
-Implementation status as of 2026-06-21:
+Implementation status as of 2026-06-24:
 
 - `core/crypto.py` ships the cryptographic primitives the rest of §7 will
   rely on: PBKDF2-SHA256 auth credential derivation (600k iterations),
@@ -411,9 +411,13 @@ Implementation status as of 2026-06-21:
   inverse a pulling peer runs; `push_backlog` drains `unsynced_ops()` over a
   `Transport` and records each server-assigned op_id. All testable with no
   server (a fake transport verifies + decrypts like a peer).
-- Still designed only: the real transport (Cloudflare Durable Objects server),
-  the `login` handshake that produces the `Identity` bundle, the `sync` /
-  `devices` CLI commands, and pull/replay back into the local tables.
+- The **server is now fully designed** in §7.9–§7.13 (topology, data model, API
+  surface, op_id assignment, entitlement) and ADR 2026-06-24. Decisions:
+  one Durable Object per account, HTTP push/catch-up + receive-only WebSocket,
+  an `is_pro` entitlement flag with Stripe deferred.
+- Still **not built**: the `worker/` package itself, the `login` handshake that
+  produces the `Identity` bundle, the `sync` / `devices` CLI commands, and
+  pull/replay back into the local tables.
 
 ### 7.1 Op model `[local log shipped; server replay designed]`
 
@@ -614,6 +618,131 @@ Not in v0.2. Changing the master password in v0.2 requires deleting the
 server account, re-encrypting locally, and registering a new account.
 `marbles rotate-key` lands in v0.3.
 
+### 7.9 Server topology and runtime `[designed]`
+
+The server is a TypeScript Cloudflare Worker plus Durable Objects. See
+[`docs/adr/2026-06-24-sync-server-architecture.md`](./adr/2026-06-24-sync-server-architecture.md)
+for the decisions and alternatives. It lands as a new `worker/` package.
+
+**One Durable Object per account**, addressed by `account_id`. Because a DO
+serializes every request to it, the account's `op_id` counter is monotonic and
+gapless (§7.2) with no locks. The per-account DO owns:
+
+- the monotonic `op_id` counter,
+- the append-only op store,
+- the device registry (public keys + revocation state),
+- the set of live WebSocket connections for the account.
+
+A small **global registry in D1** holds only what must be read *before* an
+account's DO is addressable: the login lookup `email -> account_id, salt,
+auth_hash, is_pro`. Nothing content-adjacent lives in D1.
+
+The server is a sealed relay (§7.6): its entire trusted job is verify-signature,
+check-skew, assign-`op_id`, store, fan-out, enforce-entitlement. It cannot index
+or read content; the ciphertext is opaque to it.
+
+### 7.10 Server data model `[designed]`
+
+**D1 (global), table `accounts`:**
+
+| Column | Notes |
+| --- | --- |
+| `account_id` | ULID, primary key. Also the DO name. |
+| `email` | Unique. |
+| `salt` | Per-account 16-byte salt (base64), generated at registration (§7.3). Fetched unauthenticated at login so the client can derive its keys. |
+| `auth_hash` | A server-side hash of the client-uploaded `auth_credential` (which is itself PBKDF2-stretched, §7.3). The raw credential is never stored. |
+| `is_pro` | Boolean entitlement gate (§7.12). |
+| `created_at` | ISO 8601 UTC. |
+
+**Durable Object (per account) transactional storage:**
+
+| Key | Value |
+| --- | --- |
+| `next_op_id` | Integer counter, starts at 1. |
+| `op:{op_id padded}` | `{ device_id, client_ts, server_ts, blob, signature }` — the stored op. Zero-padded key so a prefix range scan returns ops in `op_id` order for pull. |
+| `device:{device_id}` | `{ pubkey, created_at, revoked }`. The Ed25519 public key the server checks signatures against, plus revocation state. |
+
+The DO stores the op exactly as relayed plus the two server-assigned fields
+(`op_id`, `server_ts`). `blob` and `signature` are opaque base64. There is no
+content, note_id, or op type anywhere in server storage (§7.6).
+
+### 7.11 API surface `[designed]`
+
+All requests are HTTPS (TLS via Workers). After login, push/pull/connect carry
+a **session token** — a signed JWT scoped to `(account_id, device_id, exp)`,
+validated at the Worker edge before the request is routed to the account DO.
+
+| Method + path | Auth | Purpose |
+| --- | --- | --- |
+| `POST /account` | none | Create account for an email; server generates and returns `{ account_id, salt }`. |
+| `PUT /account/auth` | none (proves possession via the credential itself) | Set `auth_hash` from the client-derived `auth_credential`. Completes registration. |
+| `GET /account/salt?email=` | none | Return the per-account `salt` so the client can derive `auth_credential` and `K` at login. |
+| `POST /login` | none | `{ email, auth_credential }`; server checks against `auth_hash`, returns `{ account_id, session_token }`. |
+| `POST /devices` | session | Register this device's Ed25519 public key; returns the generated `device_id`. Idempotent per device on re-login. |
+| `GET /devices` | session | List active (non-revoked) devices. |
+| `POST /devices/{id}/revoke` | session | Mark a device revoked; the DO rejects its future ops (§7.3). |
+| `POST /push` | session | Submit one push envelope (§7.5); returns `{ op_id }`. This is the concrete `Transport.push`. |
+| `GET /ops?after={op_id}` | session | Return ops with `op_id > after`, in order, each in the pull wire format (§7.5). `after=0` bootstraps. |
+| `GET /connect` (WebSocket) | session | Open a receive-only live stream; the DO pushes each newly accepted op (pull format) to the account's other sockets. Uses the DO WebSocket Hibernation API. |
+
+**Login handshake.** Salts are server-owned (§7.3). The client fetches the salt
+(`GET /account/salt`), derives `auth_credential = PBKDF2(pw, salt)` and the
+encryption key `K = Argon2id(pw, salt)` locally, then `POST /login` with only
+the `auth_credential`. `K` never leaves the device. On first login on a new
+device, the client generates an Ed25519 keypair and registers the public key via
+`POST /devices`.
+
+**`marbles sync` loop.** Without `--once`, the command opens the `GET /connect`
+WebSocket and, in the same foreground process, drains the local push backlog via
+`POST /push` and catches up via `GET /ops?after=`. It is reconcile-by-cursor:
+the client tracks the highest `op_id` it has applied, ignores ops it already
+has, and uses `GET /ops?after=` to fill any gap a live socket missed. No
+background daemon; the socket is open only while the command runs.
+
+### 7.12 op_id assignment, push processing, idempotency `[designed]`
+
+On `POST /push` the account DO, serially:
+
+1. Validates the session token and that `device_id` is registered and **not
+   revoked**; else `403`.
+2. **Verifies the Ed25519 signature** over `device_id || client_ts || blob`
+   against the stored device public key (§7.5); else `403`. The server refuses
+   to store an op no registered device signed.
+3. **Skew check:** rejects `client_ts` more than 300 s ahead of server time
+   (§7.2) with `409`; late ops are accepted without fuss.
+4. Assigns `op_id = next_op_id++` and stamps `server_ts`.
+5. Persists the op atomically in DO storage.
+6. Fans the op out (pull format) to the account's other live WebSockets.
+7. Returns `{ op_id }`.
+
+**Idempotency / at-least-once.** The client marks an op synced only after the
+transport returns its `op_id` (`core/sync.py`). If the connection drops after
+step 5 but before the client records the result, the client re-pushes on the
+next run; the server assigns a **new** `op_id` to the duplicate. This is
+harmless: replay is idempotent under row-level last-write-wins (§7.2) — a
+re-applied INSERT/UPDATE resolves to the same row, a re-applied DELETE is a
+no-op. v0.2 does not deduplicate server-side; a client-supplied idempotency key
+is a possible v0.3 refinement.
+
+**Drop/reorder.** Because `op_id` is gapless by construction, a client can
+detect an *accidental* gap in a pull. Defending against a *malicious* server
+that renumbers or withholds accepted ops would require a hash chain, which v0.2
+deliberately omits (§7.4).
+
+### 7.13 Entitlement, limits, and abuse controls `[designed]`
+
+- **Pro gate.** `push`, `ops`, and `connect` refuse with `402 Payment Required`
+  when `is_pro` is false. The free tier never reaches these endpoints (§7.7);
+  the gate is the server's enforcement of that. Billing that *sets* `is_pro`
+  (Stripe Checkout + webhook) is deferred past v0.2; the flag is the seam.
+- **Device cap.** Registration of a 6th active device returns `409`; the user
+  must revoke one first (§7.3).
+- **Payload cap.** A push envelope's `blob` is capped (target: 1 MiB) so a
+  single op cannot be used to balloon account storage; note content has no local
+  cap (§2.1), so a pathological note is rejected at push with `413`.
+- **Rate limiting.** A soft per-account write-rate limit bounds abuse; the exact
+  budget is set at deploy time, not in this SPEC.
+
 ---
 
 ## 8. Version plan
@@ -660,7 +789,8 @@ Phase 4 acceptance criteria:
   fallback to a GitHub Releases mirror. **Met** (HF fetch exercised on the
   first real reembed).
 
-Phase 2 acceptance criteria:
+Phase 2 acceptance criteria (server shape specified in §7.9–§7.13 and
+ADR 2026-06-24):
 
 - `marbles login`, `marbles sync`, `marbles sync status`,
   `marbles devices list/revoke`, `marbles logout` all work.
@@ -668,6 +798,9 @@ Phase 2 acceptance criteria:
   in step over WebSocket within seconds of a write on the first device.
 - All op payloads are AES-256-GCM encrypted; the server logs show no
   plaintext content under any failure mode.
+- The server enforces signature verification, the `client_ts` skew check, the
+  `is_pro` entitlement gate, and the 5-device cap per §7.12–§7.13; ops signed by
+  a revoked device are rejected.
 
 ### v0.3.0 `[planned]`
 
