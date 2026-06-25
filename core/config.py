@@ -9,6 +9,9 @@ Schema:
     [embedding]
     model_name = "multilingual-e5-small"
     models_dir = "~/.marbles/models"   # optional; default shown
+
+    [sync]
+    server_url = "https://sync.example.com"  # optional; default is localhost dev
 """
 
 from __future__ import annotations
@@ -20,6 +23,9 @@ from pathlib import Path
 DEFAULT_CONFIG_PATH = Path.home() / ".marbles" / "config.toml"
 DEFAULT_MODEL_NAME = "multilingual-e5-small"
 DEFAULT_MODELS_DIR = Path.home() / ".marbles" / "models"
+# No production server is deployed yet; default to the local `wrangler dev` port
+# so a developer can exercise sync end to end. Override in config.toml [sync].
+DEFAULT_SERVER_URL = "http://127.0.0.1:8787"
 
 
 @dataclass(frozen=True)
@@ -34,8 +40,14 @@ class EmbeddingConfig:
 
 
 @dataclass(frozen=True)
+class SyncConfig:
+    server_url: str = DEFAULT_SERVER_URL
+
+
+@dataclass(frozen=True)
 class Config:
     embedding: EmbeddingConfig = EmbeddingConfig()
+    sync: SyncConfig = SyncConfig()
 
 
 def _expand(p: str) -> Path:
@@ -63,4 +75,8 @@ def load_config(path: Path | None = None) -> Config:
         if "models_dir" in emb_raw
         else DEFAULT_MODELS_DIR,
     )
-    return Config(embedding=embedding)
+
+    sync_raw = raw.get("sync", {})
+    sync = SyncConfig(server_url=sync_raw.get("server_url", DEFAULT_SERVER_URL))
+
+    return Config(embedding=embedding, sync=sync)

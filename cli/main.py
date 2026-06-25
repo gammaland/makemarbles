@@ -286,6 +286,71 @@ def count(
 
 
 @app.command()
+def login(
+    email: Annotated[
+        str | None, typer.Option("--email", help="Account email (prompted if omitted).")
+    ] = None,
+) -> None:
+    """Log in (or register) and enroll this device for sync."""
+    from core.identity import DeviceIdentity, perform_login
+    from core.remote import SyncClient, SyncError
+
+    cfg = load_config()
+    client = SyncClient(cfg.sync.server_url)
+    email = email or typer.prompt("Email")
+
+    try:
+        register = not client.account_exists(email)
+    except Exception as e:  # network/transport failure
+        console.print(f"[red]cannot reach sync server[/red] ({cfg.sync.server_url}): {e}")
+        raise typer.Exit(1)
+
+    if register:
+        console.print(f"[yellow]No account for {email}.[/yellow]")
+        if not typer.confirm("Register a new account?", default=True):
+            raise typer.Exit(1)
+        console.print(
+            "[dim]There is no password recovery — forgetting the password "
+            "permanently loses synced data.[/dim]"
+        )
+
+    password = typer.prompt("Password", hide_input=True)
+    if register and password != typer.prompt("Confirm password", hide_input=True):
+        console.print("[red]passwords do not match[/red]")
+        raise typer.Exit(1)
+
+    try:
+        identity = perform_login(
+            client,
+            email,
+            password,
+            prior=DeviceIdentity.load(),
+            register_if_missing=register,
+        )
+    except SyncError as e:
+        msg = "incorrect password" if e.status == 403 else e.message
+        console.print(f"[red]login failed:[/red] {msg}")
+        raise typer.Exit(1)
+
+    identity.save()
+    console.print(
+        f"[green]✓ logged in[/green] as {email}  ·  device [dim]{identity.device_id}[/dim]"
+    )
+
+
+@app.command()
+def logout() -> None:
+    """Remove this device's local sync credentials. Local notes are untouched."""
+    from core.identity import DEFAULT_IDENTITY_PATH
+
+    if DEFAULT_IDENTITY_PATH.is_file():
+        DEFAULT_IDENTITY_PATH.unlink()
+        console.print("[green]✓ logged out[/green] (local notes untouched)")
+    else:
+        console.print("[dim]not logged in[/dim]")
+
+
+@app.command()
 def reembed(
     model: Annotated[
         str | None,
