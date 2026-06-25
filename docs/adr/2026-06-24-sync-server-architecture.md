@@ -109,10 +109,18 @@ Alternative weighed: **full Stripe in v0.2.** More "real", but it front-loads
 non-showcase work and a live payment dependency into the milestone whose point
 is the sync engine. Deferred.
 
+> **Amendment (2026-06-24, same day):** request authentication is **device
+> Ed25519 signatures, not session tokens.** After a device is enrolled (a
+> password-gated `POST /devices`), every ongoing request is signed by the device
+> key and verified against the registered public key; push is self-authenticated
+> by its op signature. There is no JWT, no session store, and revocation is
+> instant. This supersedes the "session token" language in §4/§6 below. See
+> SPEC §7.11 for the canonical scheme.
+
 ## 6. What this ADR does not decide
 
-- The exact session-token format (signed JWT vs opaque) — an implementation
-  detail captured in SPEC §7.11, not an architectural fork.
+- ~~The exact session-token format~~ — superseded by the amendment above: there
+  is no session token; ongoing requests use device signatures (SPEC §7.11).
 - Key rotation / recovery codes — already deferred to v0.3 (§7.8, §7.3).
 - A hash chain over the op log — explicitly out of scope for v0.2 (§7.4); a
   malicious server can still drop or reorder accepted ops. Note that because
