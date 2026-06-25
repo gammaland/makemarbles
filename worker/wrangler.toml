@@ -8,9 +8,10 @@ compatibility_flags = ["nodejs_compat"]
 name = "ACCOUNT_DO"
 class_name = "AccountDO"
 
+# SQLite-backed Durable Objects — available on the Workers free plan.
 [[migrations]]
 tag = "v1"
-new_classes = ["AccountDO"]
+new_sqlite_classes = ["AccountDO"]
 
 # Global account registry (SPEC §7.10). Real database_id is set at deploy.
 [[d1_databases]]
