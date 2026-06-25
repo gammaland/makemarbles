@@ -60,10 +60,14 @@ def _score(per_query_ranks: list[int | None]) -> dict[str, float]:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--model", default=None, help="Override the configured model name.")
+    ap.add_argument("--data", default=None,
+                    help="Path to an eval set JSON (defaults to the committed synthetic set). "
+                         "Use this to run a private real-note dogfood set off-repo.")
     ap.add_argument("--json", action="store_true", help="Emit machine-readable JSON.")
     args = ap.parse_args()
 
-    data = json.loads(EVAL_PATH.read_text(encoding="utf-8"))
+    data_path = Path(args.data).expanduser() if args.data else EVAL_PATH
+    data = json.loads(data_path.read_text(encoding="utf-8"))
     notes = data["notes"]
     queries = data["queries"]
 

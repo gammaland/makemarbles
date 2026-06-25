@@ -5,7 +5,7 @@
 > document captures the state that those decisions produce. When code and SPEC
 > disagree, that is a bug in one of them.
 >
-> Last reviewed: 2026-06-18
+> Last reviewed: 2026-06-24
 
 ## Status legend
 
@@ -133,6 +133,9 @@ the embedding model contributes paraphrase recall.
 - With no flag, the command runs hybrid when a vector index exists, FTS5
   alone when it does not. Degradation is silent because `marbles search`
   must never block on a model download the user did not ask for.
+- On a Chinese-dominant corpus the FTS5 channel contributes effectively
+  nothing (see §6.1), so hybrid collapses to vector-only and `--exact` is
+  near-useless. This is expected, not a bug.
 - `--exact` forces FTS5 only (the v0.1 behavior), bypassing the embedding
   engine entirely. Use for grep-style lookups.
 - `--semantic` forces vector only. Refuses with a clear hint when
@@ -343,6 +346,29 @@ reference at `docs/private/embedding-stack.md` for the runtime layout
   An end-to-end smoke (downloads e5-small from HuggingFace, loads the
   engine, runs a 4-query retrieval ranking eval) was run manually and
   returned Recall@2 = 4/4. `[shipped]`
+- **Real-note dogfood validated (2026-06-24).** On 80 of the user's own
+  notes (date-stratified over 8 months, Chinese-dominant) and 25 hand-authored
+  queries (21 paraphrase / 4 lexical), e5-small scores vector recall@5 0.96,
+  recall@10 1.00, MRR 0.92; FTS5 keyword scores 0.00 across the board. The
+  synthetic-set result (§3.2) now holds on real personal data. Harness gained a
+  `--data` flag; the private set lives off-repo under `docs/private/dogfood/`.
+  `[shipped]`
+- **e5-small vs MiniLM head-to-head on real notes (2026-06-24): keep e5-small.**
+  On the same dogfood set, `paraphrase-multilingual-MiniLM-L12-v2` scored vector
+  recall@5 1.00 / MRR 0.903 vs e5-small's 0.96 / 0.919. MiniLM caught the one
+  query e5 missed at rank 7 (d19); e5 ranked its hits slightly higher (better
+  MRR). Both are 384-dim and ~450 MB fp32. The gaps are one query out of 25 —
+  noise at this sample size — so there is no reason to switch the default. e5
+  keeps the marginal MRR edge plus its documented E5 prefix discipline. MiniLM
+  has a HuggingFace (Xenova) source in `model_download.py` but no mirror
+  fallback. `[shipped]`
+- **Finding: keyword search is near-useless on Chinese, even with token
+  overlap.** unicode61 tokenizes a run of CJK as one whole-phrase token and the
+  search path ANDs all query terms, so a natural-language query almost never
+  reproduces an exact contiguous CJK token run. For a Chinese-dominant corpus
+  `--exact` returns nothing useful and hybrid (§3.1) reduces to vector-only,
+  because FTS contributes no ranks to fuse. This is a real limitation of the
+  current keyword path, not an eval artifact.
 
 ### 6.2 Not yet built
 
@@ -351,8 +377,9 @@ reference at `docs/private/embedding-stack.md` for the runtime layout
   release with the int8-quantized weights as attached files.
 - SHA-256 hashes for the current artifact set. v0.2 alpha skips verification;
   v0.2 GA pins hashes against the release artifacts we sign ourselves.
-- The ADR §8 dogfood eval set (50 to 100 marbles, 20 paraphrase queries)
-  for empirically validating model quality on real personal notes.
+- A second download source (mirror fallback) for the MiniLM and bge-m3
+  benchmark models. They have a single HuggingFace (Xenova) source today; only
+  e5-small, the shipped default, has the GitHub Releases fallback.
 
 ### 6.3 Embedding model as a config value, not a constant
 
@@ -622,13 +649,13 @@ Phase 4 first, Phase 2 second. The two are independent.
 Phase 4 acceptance criteria:
 
 - `marbles search "minimal pair query"` returns a note that has no token
-  overlap with the query but is semantically related. **Met** on a synthetic
-  general eval set (50 notes / 25 queries, EN/ZH/mixed): dense recall 0.95
-  @5/@10 on paraphrase queries vs 0.00 for FTS5. See ADR 2026-06-13 Appendix A.
-  *Caveat:* the §8 head-to-head against MiniLM and bge-m3 is done on the
-  synthetic set (ADR Appendix A) — e5-small vs MiniLM is now an open question to
-  settle on real notes; the 50–100 *real* dogfood notes still gate GA, not this
-  checkpoint.
+  overlap with the query but is semantically related. **Met** on both a
+  synthetic general eval set (50 notes / 25 queries, EN/ZH/mixed: dense recall
+  0.95 @5/@10 vs 0.00 for FTS5; ADR 2026-06-13 Appendix A) **and the real-note
+  dogfood** (2026-06-24, §6.1: 80 real notes / 25 queries, vector recall@5 0.96,
+  recall@10 1.00 vs 0.00 for FTS5). The e5-small vs MiniLM head-to-head on real
+  notes is now **resolved** (2026-06-24, §6.1): effectively a tie, default stays
+  e5-small.
 - `marbles reembed` executes end to end without `--dry-run`, populating
   `embedding_model` and `embedded_at` for every note. **Met** (verified
   2026-06-21).
