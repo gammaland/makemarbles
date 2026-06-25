@@ -1,0 +1,14 @@
+name = "makemarbles-sync"
+main = "src/index.ts"
+compatibility_date = "2024-11-06"
+compatibility_flags = ["nodejs_compat"]
+
+# One Durable Object per account (ADR 2026-06-24). The DO name is the account_id.
+[[durable_objects.bindings]]
+name = "ACCOUNT_DO"
+class_name = "AccountDO"
+
+# SQLite-backed DO storage (the current default backend).
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["AccountDO"]

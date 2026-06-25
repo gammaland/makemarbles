@@ -415,9 +415,15 @@ Implementation status as of 2026-06-24:
   surface, op_id assignment, entitlement) and ADR 2026-06-24. Decisions:
   one Durable Object per account, HTTP push/catch-up + receive-only WebSocket,
   an `is_pro` entitlement flag with Stripe deferred.
-- Still **not built**: the `worker/` package itself, the `login` handshake that
-  produces the `Identity` bundle, the `sync` / `devices` CLI commands, and
-  pull/replay back into the local tables.
+- The `worker/` package now ships its **first slice**: the per-account
+  `AccountDO` with `POST /push` (device + Ed25519 verify, ±300 s skew check,
+  gapless `op_id` assignment, store), `GET /ops?after=`, and a minimal device
+  registry. A cross-language golden vector (envelope signed by the Python
+  client) is verified by the worker in CI, guarding wire compatibility.
+- Still **not built**: the `login` handshake that produces the `Identity`
+  bundle, JWT edge auth + the `is_pro` entitlement gate, the live WebSocket
+  fan-out, the `sync` / `devices` CLI commands, and pull/replay back into the
+  local tables.
 
 ### 7.1 Op model `[local log shipped; server replay designed]`
 
